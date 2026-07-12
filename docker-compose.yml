@@ -1,0 +1,15 @@
+services:
+  wimt:
+    build:
+      context: ./frontend
+    container_name: wimt
+    restart: unless-stopped
+    ports:
+      - "${WIMT_PORT:-3001}:3000"
+    environment:
+      WIMT_DB_PATH: /app/data/wimt.sqlite
+      OPENAI_UPSTREAM_BASE_URL: ${OPENAI_UPSTREAM_BASE_URL:-https://api.openai.com}
+      ANTHROPIC_UPSTREAM_BASE_URL: ${ANTHROPIC_UPSTREAM_BASE_URL:-https://api.anthropic.com}
+      DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-auto}
+    volumes:
+      - ./frontend/data:/app/data

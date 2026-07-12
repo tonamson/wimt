@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WIMT Token Audit
 
-## Getting Started
+Local Next.js app that works as an AI proxy and token dashboard.
 
-First, run the development server:
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev -- --hostname 127.0.0.1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://127.0.0.1:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Point CLIs at the proxy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+OpenAI-compatible tools, including Codex-style clients:
 
-## Learn More
+```bash
+export OPENAI_BASE_URL=http://127.0.0.1:3000/v1
+export OPENAI_API_KEY=sk-...
+```
 
-To learn more about Next.js, take a look at the following resources:
+Anthropic-compatible tools, including Claude-style clients:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:3000
+export ANTHROPIC_API_KEY=sk-ant-...
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The proxy endpoint is `/v1/*`. It forwards to the configured upstream and logs usage into SQLite.
 
-## Deploy on Vercel
+## Configure upstream providers
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Defaults:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+export OPENAI_UPSTREAM_BASE_URL=https://api.openai.com
+export ANTHROPIC_UPSTREAM_BASE_URL=https://api.anthropic.com
+export DEFAULT_PROVIDER=auto
+```
+
+The dashboard also has inputs for changing OpenAI and Anthropic upstream base URLs at runtime. Use this for OpenAI-compatible or Anthropic-compatible third-party providers.
+
+## Data
+
+SQLite file defaults to:
+
+```bash
+frontend/data/wimt.sqlite
+```
+
+Override it with:
+
+```bash
+export WIMT_DB_PATH=/absolute/path/to/wimt.sqlite
+```
+
+## Checks
+
+```bash
+npm test
+npm run lint
+npm run build
+```

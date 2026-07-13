@@ -55,8 +55,12 @@ export function toDateInputValue(date: Date) {
 }
 
 export function dateRangeErrorResponse(error: unknown) {
+  if (!(error instanceof RangeError)) {
+    throw error;
+  }
+
   return Response.json(
-    { error: error instanceof Error ? error.message : "Invalid date range" },
+    { error: error.message },
     { status: 400 },
   );
 }

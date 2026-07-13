@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -71,10 +71,16 @@ test("rejects invalid ranges and formats a 400 response", async () => {
   assert.deepEqual(await response.json(), { error: "Invalid date range" });
 });
 
+test("rethrows non-range errors unchanged", () => {
+  const error = new Error("Database unavailable");
+  assert.throws(() => dateRangeErrorResponse(error), (thrown) => thrown === error);
+});
+
 test("dashboard routes reject invalid date ranges", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wimt-routes-"));
+  const dbPath = path.join(dir, "test.sqlite");
   const previousDbPath = process.env.WIMT_DB_PATH;
-  process.env.WIMT_DB_PATH = path.join(dir, "test.sqlite");
+  process.env.WIMT_DB_PATH = dbPath;
 
   try {
     const handlers = [
@@ -98,6 +104,8 @@ test("dashboard routes reject invalid date ranges", async () => {
         );
       }
     }
+
+    assert.equal(existsSync(dbPath), false);
   } finally {
     if (previousDbPath === undefined) {
       delete process.env.WIMT_DB_PATH;

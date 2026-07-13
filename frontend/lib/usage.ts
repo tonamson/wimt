@@ -2,12 +2,12 @@ export type ProviderSchema = "openai" | "anthropic" | "unknown";
 
 export type NormalizedUsage = {
   schema: ProviderSchema;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cacheWriteTokens: number | null;
-  cacheReadTokens: number | null;
-  totalCacheTokens: number | null;
-  totalTokens: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCacheTokens: number;
+  totalTokens: number;
   rawUsage: unknown;
   usageMissing: boolean;
 };
@@ -25,29 +25,29 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
     const details = isRecord(usage.prompt_tokens_details)
       ? usage.prompt_tokens_details
       : {};
-    const cacheReadTokens = numberOrNull(details.cached_tokens);
-    const cacheWriteTokens = numberOrNull(
+    const cacheReadTokens = numberOrZero(details.cached_tokens);
+    const cacheWriteTokens = numberOrZero(
       details.cache_write_tokens ?? details.cache_creation_tokens,
     );
 
     return {
       schema: "openai",
-      inputTokens: numberOrNull(usage.prompt_tokens),
-      outputTokens: numberOrNull(usage.completion_tokens),
+      inputTokens: numberOrZero(usage.prompt_tokens),
+      outputTokens: numberOrZero(usage.completion_tokens),
       cacheWriteTokens,
       cacheReadTokens,
-      totalCacheTokens: sumKnown(cacheWriteTokens, cacheReadTokens),
-      totalTokens: numberOrNull(usage.total_tokens),
+      totalCacheTokens: cacheWriteTokens + cacheReadTokens,
+      totalTokens: numberOrZero(usage.total_tokens),
       rawUsage: usage,
       usageMissing: false,
     };
   }
 
   if (isNumber(usage.input_tokens) || isNumber(usage.output_tokens)) {
-    const inputTokens = numberOrNull(usage.input_tokens);
-    const outputTokens = numberOrNull(usage.output_tokens);
-    const cacheWriteTokens = numberOrNull(usage.cache_creation_input_tokens);
-    const cacheReadTokens = numberOrNull(usage.cache_read_input_tokens);
+    const inputTokens = numberOrZero(usage.input_tokens);
+    const outputTokens = numberOrZero(usage.output_tokens);
+    const cacheWriteTokens = numberOrZero(usage.cache_creation_input_tokens);
+    const cacheReadTokens = numberOrZero(usage.cache_read_input_tokens);
 
     return {
       schema: "anthropic",
@@ -55,13 +55,8 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
       outputTokens,
       cacheWriteTokens,
       cacheReadTokens,
-      totalCacheTokens: sumKnown(cacheWriteTokens, cacheReadTokens),
-      totalTokens: sumKnown(
-        inputTokens,
-        outputTokens,
-        cacheWriteTokens,
-        cacheReadTokens,
-      ),
+      totalCacheTokens: cacheWriteTokens + cacheReadTokens,
+      totalTokens: inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens,
       rawUsage: usage,
       usageMissing: false,
     };
@@ -109,29 +104,19 @@ function getUsage(value: unknown): JsonRecord | null {
 function emptyUsage(usageMissing: boolean, rawUsage: unknown): NormalizedUsage {
   return {
     schema: "unknown",
-    inputTokens: null,
-    outputTokens: null,
-    cacheWriteTokens: null,
-    cacheReadTokens: null,
-    totalCacheTokens: null,
-    totalTokens: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    totalCacheTokens: 0,
+    totalTokens: 0,
     rawUsage,
     usageMissing,
   };
 }
 
-function numberOrNull(value: unknown): number | null {
-  return isNumber(value) ? value : null;
-}
-
-function sumKnown(...values: Array<number | null>): number | null {
-  const known = values.filter((value): value is number => value !== null);
-
-  if (known.length === 0) {
-    return null;
-  }
-
-  return known.reduce((total, value) => total + value, 0);
+function numberOrZero(value: unknown): number {
+  return isNumber(value) ? value : 0;
 }
 
 function isNumber(value: unknown): value is number {

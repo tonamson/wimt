@@ -60,12 +60,12 @@ export async function proxyAiRequest(
         method: request.method,
         model,
         statusCode: upstreamResponse.status,
-        inputTokens: null,
-        outputTokens: null,
-        cacheWriteTokens: null,
-        cacheReadTokens: null,
-        totalCacheTokens: null,
-        totalTokens: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        totalCacheTokens: 0,
+        totalTokens: 0,
         usageMissing: true,
         rawUsageJson: null,
         requestJson: sanitizeJsonText(requestText, null),
@@ -91,12 +91,12 @@ export async function proxyAiRequest(
         method: request.method,
         model,
         statusCode: upstreamResponse.status,
-        inputTokens: null,
-        outputTokens: null,
-        cacheWriteTokens: null,
-        cacheReadTokens: null,
-        totalCacheTokens: null,
-        totalTokens: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        totalCacheTokens: 0,
+        totalTokens: 0,
         usageMissing: true,
         rawUsageJson: null,
         requestJson: sanitizeJsonText(requestText, null),
@@ -114,6 +114,7 @@ export async function proxyAiRequest(
     const responseText = await upstreamResponse.text();
     const parsedResponse = parseJson(responseText);
     const normalized = normalizeUsage(parsedResponse);
+    debugUsage(provider, "response", normalized);
 
     store.insertRequest({
       sessionId,
@@ -153,12 +154,12 @@ export async function proxyAiRequest(
       method: request.method,
       model,
       statusCode: 502,
-      inputTokens: null,
-      outputTokens: null,
-      cacheWriteTokens: null,
-      cacheReadTokens: null,
-      totalCacheTokens: null,
-      totalTokens: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+      totalCacheTokens: 0,
+      totalTokens: 0,
       usageMissing: true,
       rawUsageJson: null,
       requestJson: sanitizeJsonText(requestText, null),
@@ -183,6 +184,7 @@ async function logStreamUsage(
 
   const text = await new Response(body).text();
   const normalized = normalizeUsageFromSse(text);
+  debugUsage(provider, "stream", normalized);
 
   getStore().updateRequestUsage(requestId, {
     providerSchema: normalized.schema === "unknown" ? provider : normalized.schema,
@@ -197,6 +199,30 @@ async function logStreamUsage(
       normalized.rawUsage === null ? null : JSON.stringify(normalized.rawUsage),
     responseJson: text.slice(0, 50_000),
     latencyMs: Date.now() - started,
+  });
+}
+
+function debugUsage(
+  provider: Provider,
+  source: "response" | "stream",
+  usage: ReturnType<typeof normalizeUsage>,
+) {
+  if (process.env.WIMT_DEBUG_USAGE !== "1") {
+    return;
+  }
+
+  console.debug("[wimt:usage]", {
+    provider,
+    source,
+    schema: usage.schema,
+    usageMissing: usage.usageMissing,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    totalCacheTokens: usage.totalCacheTokens,
+    totalTokens: usage.totalTokens,
+    rawUsage: usage.rawUsage,
   });
 }
 

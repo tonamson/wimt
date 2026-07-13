@@ -21,7 +21,7 @@ test("summarizes requests by totals, provider, model, and current session", () =
       statusCode: 200,
       inputTokens: 100,
       outputTokens: 30,
-      cacheWriteTokens: null,
+      cacheWriteTokens: 0,
       cacheReadTokens: 40,
       totalCacheTokens: 40,
       totalTokens: 130,
@@ -80,6 +80,48 @@ test("starts a new session without clearing old logs", () => {
 
     assert.notEqual(first.id, second.id);
     assert.equal(store.getCurrentSession().id, second.id);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lists requests with id cursor pagination", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wimt-store-"));
+  const store = createStore(path.join(dir, "test.sqlite"));
+
+  try {
+    const sessionId = store.getCurrentSession().id;
+
+    for (const totalTokens of [10, 20, 30]) {
+      store.insertRequest({
+        sessionId,
+        providerSchema: "openai",
+        upstreamBaseUrl: "https://api.openai.com",
+        requestPath: "/v1/responses",
+        method: "POST",
+        model: "gpt-4.1",
+        statusCode: 200,
+        inputTokens: totalTokens,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        totalCacheTokens: 0,
+        totalTokens,
+        usageMissing: false,
+        rawUsageJson: "{}",
+        requestJson: "{}",
+        responseJson: "{}",
+        error: null,
+        latencyMs: 1,
+      });
+    }
+
+    const firstPage = store.listRequests(2);
+    const secondPage = store.listRequests(2, firstPage.at(-1)?.id);
+
+    assert.deepEqual(firstPage.map((row) => row.totalTokens), [30, 20]);
+    assert.deepEqual(secondPage.map((row) => row.totalTokens), [10]);
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

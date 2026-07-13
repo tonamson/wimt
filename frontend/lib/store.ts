@@ -11,12 +11,12 @@ export type RequestInsert = {
   method: string;
   model: string | null;
   statusCode: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cacheWriteTokens: number | null;
-  cacheReadTokens: number | null;
-  totalCacheTokens: number | null;
-  totalTokens: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCacheTokens: number;
+  totalTokens: number;
   usageMissing: boolean;
   rawUsageJson: string | null;
   requestJson: string | null;
@@ -33,11 +33,29 @@ export type Session = {
 type GroupRow = {
   key: string | null;
   requests: number;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  totalCacheTokens: number | null;
-  totalTokens: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCacheTokens: number;
+  totalTokens: number;
   usageMissing: number | null;
+};
+
+type RequestRow = Omit<RequestInsert, "usageMissing"> & {
+  id: number;
+  createdAt: string;
+  usageMissing: number;
+};
+
+type UsagePoint = {
+  bucket: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCacheTokens: number;
+  totalTokens: number;
 };
 
 const DEFAULT_DB_PATH = path.join(process.cwd(), "data", "wimt.sqlite");
@@ -231,6 +249,8 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           COUNT(*) as requests,
           COALESCE(SUM(input_tokens), 0) as inputTokens,
           COALESCE(SUM(output_tokens), 0) as outputTokens,
+          COALESCE(SUM(cache_write_tokens), 0) as cacheWriteTokens,
+          COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
           COALESCE(SUM(total_cache_tokens), 0) as totalCacheTokens,
           COALESCE(SUM(total_tokens), 0) as totalTokens,
           COALESCE(SUM(usage_missing), 0) as usageMissing
@@ -242,7 +262,10 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       .all() as GroupRow[];
   }
 
-  function listRequests(limit = 100, offset = 0) {
+  function listRequests(limit = 100, cursor?: number) {
+    const where = cursor === undefined ? "" : "WHERE id < ?";
+    const params = cursor === undefined ? [limit] : [cursor, limit];
+
     return db
       .prepare(
         `
@@ -255,11 +278,12 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           total_cache_tokens as totalCacheTokens, total_tokens as totalTokens,
           usage_missing as usageMissing, error, latency_ms as latencyMs
         FROM requests
+        ${where}
         ORDER BY id DESC
-        LIMIT ? OFFSET ?
+        LIMIT ?
       `,
       )
-      .all(limit, offset);
+      .all(...params) as RequestRow[];
   }
 
   function getRequest(id: number) {
@@ -280,7 +304,28 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
         WHERE id = ?
       `,
       )
-      .get(id);
+      .get(id) as RequestRow | undefined;
+  }
+
+  function getDailyUsagePoints() {
+    return db
+      .prepare(
+        `
+        SELECT
+          strftime('%Y-%m-%dT%H:%M:00.000', created_at, 'localtime') as bucket,
+          COALESCE(SUM(input_tokens), 0) as inputTokens,
+          COALESCE(SUM(output_tokens), 0) as outputTokens,
+          COALESCE(SUM(cache_write_tokens), 0) as cacheWriteTokens,
+          COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
+          COALESCE(SUM(total_cache_tokens), 0) as totalCacheTokens,
+          COALESCE(SUM(total_tokens), 0) as totalTokens
+        FROM requests
+        WHERE date(created_at, 'localtime') = date('now', 'localtime')
+        GROUP BY bucket
+        ORDER BY bucket ASC
+      `,
+      )
+      .all() as UsagePoint[];
   }
 
   function clearRequests() {
@@ -335,6 +380,7 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     getSummary,
     listRequests,
     getRequest,
+    getDailyUsagePoints,
     clearRequests,
     getSettings,
     updateSettings,

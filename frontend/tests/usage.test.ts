@@ -18,7 +18,7 @@ test("normalizes openai usage with cached tokens", () => {
   assert.equal(result.inputTokens, 100);
   assert.equal(result.outputTokens, 25);
   assert.equal(result.cacheReadTokens, 40);
-  assert.equal(result.cacheWriteTokens, null);
+  assert.equal(result.cacheWriteTokens, 0);
   assert.equal(result.totalCacheTokens, 40);
   assert.equal(result.totalTokens, 125);
   assert.equal(result.usageMissing, false);
@@ -49,7 +49,7 @@ test("marks missing usage without guessing", () => {
 
   assert.equal(result.schema, "unknown");
   assert.equal(result.rawUsage, null);
-  assert.equal(result.totalTokens, null);
+  assert.equal(result.totalTokens, 0);
   assert.equal(result.usageMissing, true);
 });
 
@@ -63,7 +63,7 @@ test("keeps unknown usage raw without mapping fields", () => {
 
   assert.equal(result.schema, "unknown");
   assert.deepEqual(result.rawUsage, { tokens: 1000, vendor_cache: 300 });
-  assert.equal(result.totalTokens, null);
+  assert.equal(result.totalTokens, 0);
   assert.equal(result.usageMissing, false);
 });
 
@@ -80,6 +80,7 @@ test("normalizes final usage from sse", () => {
   assert.equal(result.inputTokens, 10);
   assert.equal(result.outputTokens, 5);
   assert.equal(result.cacheReadTokens, 2);
+  assert.equal(result.cacheWriteTokens, 0);
   assert.equal(result.totalTokens, 17);
   assert.equal(result.usageMissing, false);
 });

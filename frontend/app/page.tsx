@@ -1,6 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import type { ApexOptions } from "apexcharts";
+
+const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 type Totals = {
   requests: number;
@@ -39,12 +43,12 @@ type RequestRow = {
   method: string;
   model: string | null;
   statusCode: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cacheWriteTokens: number | null;
-  cacheReadTokens: number | null;
-  totalCacheTokens: number | null;
-  totalTokens: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  totalCacheTokens: number;
+  totalTokens: number;
   usageMissing: number;
   rawUsageJson?: string | null;
   requestJson?: string | null;
@@ -52,6 +56,47 @@ type RequestRow = {
   error: string | null;
   latencyMs: number | null;
 };
+
+type RequestsPage = {
+  items: RequestRow[];
+  nextCursor: number | null;
+};
+
+type UsagePoint = Pick<
+  RequestRow,
+  | "inputTokens"
+  | "outputTokens"
+  | "cacheWriteTokens"
+  | "cacheReadTokens"
+  | "totalCacheTokens"
+  | "totalTokens"
+> & {
+  bucket: string;
+};
+
+type ChartKey =
+  | "inputTokens"
+  | "outputTokens"
+  | "cacheWriteTokens"
+  | "cacheReadTokens"
+  | "totalCacheTokens"
+  | "totalTokens";
+
+const requestPageSize = 15;
+
+const chartMetrics: Array<{ key: ChartKey; label: string; color: string }> = [
+  { key: "inputTokens", label: "Input", color: "#7dd3fc" },
+  { key: "outputTokens", label: "Output", color: "#6ee7b7" },
+  { key: "cacheWriteTokens", label: "Cache write", color: "#fcd34d" },
+  { key: "cacheReadTokens", label: "Cache read", color: "#67e8f9" },
+  { key: "totalCacheTokens", label: "Total cache", color: "#c4b5fd" },
+  { key: "totalTokens", label: "Total", color: "#f8fafc" },
+];
+
+const defaultChartVisible = chartMetrics.reduce(
+  (state, metric) => ({ ...state, [metric.key]: true }),
+  {} as Record<ChartKey, boolean>,
+);
 
 const emptyTotals: Totals = {
   requests: 0,
@@ -80,6 +125,10 @@ export default function Home() {
   });
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [chartRows, setChartRows] = useState<UsagePoint[]>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [cursorStack, setCursorStack] = useState<number[]>([]);
+  const [chartVisible, setChartVisible] = useState(defaultChartVisible);
   const [selected, setSelected] = useState<RequestRow | null>(null);
   const [visibleEvents, setVisibleEvents] = useState(12);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -109,13 +158,25 @@ export default function Home() {
   );
 
   async function refresh() {
-    const [summaryResponse, requestsResponse] = await Promise.all([
+    const [summaryResponse, chartResponse] = await Promise.all([
       fetch("/api/summary", { cache: "no-store" }),
-      fetch("/api/requests?limit=100", { cache: "no-store" }),
+      fetch("/api/usage-chart", { cache: "no-store" }),
     ]);
 
     setSummary(await summaryResponse.json());
-    setRequests((await requestsResponse.json()).items);
+    setChartRows(((await chartResponse.json()) as { items: UsagePoint[] }).items);
+    await loadRequests(cursorStack.at(-1));
+  }
+
+  async function loadRequests(cursor?: number) {
+    const requestsResponse = await fetch(
+      `/api/requests?limit=${requestPageSize}${cursor ? `&cursor=${cursor}` : ""}`,
+      { cache: "no-store" },
+    );
+    const page = (await requestsResponse.json()) as RequestsPage;
+
+    setRequests(page.items);
+    setNextCursor(page.nextCursor);
   }
 
   async function loadSettings() {
@@ -156,7 +217,24 @@ export default function Home() {
     }
 
     await fetch("/api/clear", { method: "POST" });
+    setCursorStack([]);
     await refresh();
+  }
+
+  async function nextPage() {
+    if (nextCursor === null) {
+      return;
+    }
+
+    const stack = [...cursorStack, nextCursor];
+    setCursorStack(stack);
+    await loadRequests(nextCursor);
+  }
+
+  async function previousPage() {
+    const stack = cursorStack.slice(0, -1);
+    setCursorStack(stack);
+    await loadRequests(stack.at(-1));
   }
 
   function loadMoreOnScroll(event: React.UIEvent<HTMLDivElement>) {
@@ -180,9 +258,6 @@ export default function Home() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 font-mono text-emerald-200">
-              proxy online
-            </span>
             <button
               className="rounded-md border border-white/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200 active:translate-y-px"
               onClick={refresh}
@@ -304,13 +379,40 @@ export default function Home() {
 
         <section className="mt-4 flex min-h-0 flex-1 flex-col rounded-lg border border-white/10 bg-white/[0.035]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-            <h2 className="text-sm font-semibold text-white">Request log</h2>
-            <span className="font-mono text-xs text-zinc-500">
-              click row for request/response detail
-            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-white">Request log</h2>
+              <p className="mt-1 font-mono text-xs text-zinc-500">
+                {requestPageSize} records/page · cursor page {cursorStack.length + 1}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={previousPage}
+                disabled={cursorStack.length === 0}
+              >
+                Previous
+              </button>
+              <button
+                className="rounded-md border border-white/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={nextPage}
+                disabled={nextCursor === null}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          <div className="border-b border-white/10 p-4">
+            <RequestChart
+              rows={chartRows}
+              visible={chartVisible}
+              onToggle={(key) =>
+                setChartVisible((state) => ({ ...state, [key]: !state[key] }))
+              }
+            />
           </div>
           <div className="overflow-auto">
-            <table className="w-full min-w-[1120px] text-left text-sm">
+            <table className="w-full min-w-[1260px] text-left text-sm">
               <thead className="sticky top-0 bg-[#10131a] text-xs uppercase tracking-[0.12em] text-zinc-500">
                 <tr>
                   {[
@@ -322,7 +424,9 @@ export default function Home() {
                     "Status",
                     "Input",
                     "Output",
-                    "Cache",
+                    "Cache write",
+                    "Cache read",
+                    "Total cache",
                     "Total",
                     "Latency",
                   ].map((heading) => (
@@ -351,6 +455,8 @@ export default function Home() {
                       row.statusCode ?? "-",
                       row.inputTokens,
                       row.outputTokens,
+                      row.cacheWriteTokens,
+                      row.cacheReadTokens,
                       row.totalCacheTokens,
                       row.totalTokens,
                       row.latencyMs ? `${row.latencyMs}ms` : "-",
@@ -379,7 +485,7 @@ export default function Home() {
                 ))}
                 {requests.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-zinc-500" colSpan={11}>
+                    <td className="px-4 py-8 text-center text-zinc-500" colSpan={13}>
                       No proxy calls yet. Point Codex or Claude CLI at the proxy
                       URL above.
                     </td>
@@ -415,6 +521,113 @@ function ProxyLine({ label, value }: { label: string; value: string }) {
   );
 }
 
+function RequestChart({
+  rows,
+  visible,
+  onToggle,
+}: {
+  rows: UsagePoint[];
+  visible: Record<ChartKey, boolean>;
+  onToggle: (key: ChartKey) => void;
+}) {
+  const activeMetrics = chartMetrics.filter((metric) => visible[metric.key]);
+  const series = activeMetrics.map((metric) => ({
+    name: metric.label,
+    data: rows.map((row) => row[metric.key] ?? 0),
+  }));
+  const options: ApexOptions = {
+    chart: {
+      id: "wimt-usage-chart",
+      type: "line",
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      foreColor: "#a1a1aa",
+      animations: { enabled: false },
+    },
+    colors: activeMetrics.map((metric) => metric.color),
+    dataLabels: { enabled: false },
+    grid: {
+      borderColor: "rgba(255,255,255,0.08)",
+      strokeDashArray: 3,
+    },
+    legend: { show: false },
+    markers: { size: rows.length <= 30 ? 3 : 0 },
+    noData: {
+      text: "No request data today",
+      style: { color: "#71717a" },
+    },
+    stroke: {
+      curve: "smooth",
+      width: 2.5,
+    },
+    theme: { mode: "dark" },
+    tooltip: {
+      shared: true,
+      theme: "dark",
+      x: {
+        formatter: (_value, options) =>
+          formatTime(rows[options?.dataPointIndex ?? -1]?.bucket ?? ""),
+      },
+      y: {
+        formatter: (value) => formatNumber(value),
+      },
+    },
+    xaxis: {
+      categories: rows.map((row) => formatTime(row.bucket)),
+      axisBorder: { color: "rgba(255,255,255,0.12)" },
+      axisTicks: { color: "rgba(255,255,255,0.12)" },
+      labels: {
+        rotate: 0,
+        style: { colors: "#71717a", fontSize: "11px" },
+      },
+      tooltip: { enabled: false },
+    },
+    yaxis: {
+      min: 0,
+      labels: {
+        formatter: (value) => formatCompactNumber(value),
+        style: { colors: "#71717a" },
+      },
+    },
+  };
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-white">Token trend</h3>
+        <div className="flex flex-wrap gap-2">
+          {chartMetrics.map((metric) => (
+            <label
+              key={metric.key}
+              className="flex cursor-pointer items-center gap-2 rounded-md border border-white/10 px-2.5 py-1.5 text-xs text-zinc-300"
+            >
+              <input
+                type="checkbox"
+                className="accent-sky-400"
+                checked={visible[metric.key]}
+                onChange={() => onToggle(metric.key)}
+              />
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: metric.color }}
+              />
+              {metric.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-white/10 bg-black/30">
+        <ApexChart options={options} series={series} type="line" height={240} />
+      </div>
+      <div className="flex justify-between font-mono text-xs text-zinc-500">
+        <span>{rows[0] ? formatTime(rows[0].bucket) : "-"}</span>
+        <span>today</span>
+        <span>{rows.at(-1) ? formatTime(rows.at(-1)!.bucket) : "-"}</span>
+      </div>
+    </div>
+  );
+}
+
 function BreakdownTable({
   title,
   rows,
@@ -430,12 +643,14 @@ function BreakdownTable({
         <h2 className="text-sm font-semibold text-white">{title}</h2>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] text-left text-sm">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-white/[0.03] text-xs uppercase tracking-[0.12em] text-zinc-500">
             <tr>
               <th className="px-4 py-3 font-medium">Key</th>
               <th className="px-4 py-3 text-right font-medium">Requests</th>
               <th className="px-4 py-3 text-right font-medium">Tokens</th>
+              <th className="px-4 py-3 text-right font-medium">Write</th>
+              <th className="px-4 py-3 text-right font-medium">Read</th>
               <th className="px-4 py-3 text-right font-medium">Cache</th>
               <th className="px-4 py-3 text-right font-medium">Missing</th>
             </tr>
@@ -453,6 +668,12 @@ function BreakdownTable({
                   {formatNumber(row.totalTokens)}
                 </td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums">
+                  {formatNumber(row.cacheWriteTokens)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono tabular-nums">
+                  {formatNumber(row.cacheReadTokens)}
+                </td>
+                <td className="px-4 py-3 text-right font-mono tabular-nums">
                   {formatNumber(row.totalCacheTokens)}
                 </td>
                 <td className="px-4 py-3 text-right font-mono tabular-nums text-amber-200">
@@ -462,7 +683,7 @@ function BreakdownTable({
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td className="px-4 py-8 text-center text-zinc-500" colSpan={5}>
+                <td className="px-4 py-8 text-center text-zinc-500" colSpan={7}>
                   {empty}
                 </td>
               </tr>
@@ -530,11 +751,13 @@ function DetailModal({
 
         <div className="grid min-h-0 flex-1 lg:grid-cols-[1fr_320px]">
           <div className="min-h-0 overflow-auto p-4">
-            <div className="grid gap-3 sm:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
                 ["Input", selected.inputTokens],
                 ["Output", selected.outputTokens],
-                ["Cache", selected.totalCacheTokens],
+                ["Cache write", selected.cacheWriteTokens],
+                ["Cache read", selected.cacheReadTokens],
+                ["Total cache", selected.totalCacheTokens],
                 ["Total", selected.totalTokens],
               ].map(([label, value]) => (
                 <div
@@ -621,6 +844,13 @@ function PayloadBlock({ title, value }: { title: string; value: string }) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 function shortSession(sessionId: string) {

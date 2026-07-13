@@ -725,8 +725,8 @@ function DetailModal({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1">
-          <div className="min-h-0 overflow-auto p-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+          <div className="shrink-0">
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
                 ["Input", selected.inputTokens],
@@ -749,17 +749,17 @@ function DetailModal({
                 </div>
               ))}
             </div>
+          </div>
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-2 lg:items-start">
-              <PayloadBlock
-                title="Request sent"
-                value={selected.requestJson ?? "request body not captured"}
-              />
-              <PayloadBlock
-                title="Response received"
-                value={selected.responseJson ?? selected.error ?? "response not captured"}
-              />
-            </div>
+          <div className="mt-4 grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+            <PayloadBlock
+              title="Request sent"
+              value={selected.requestJson ?? "request body not captured"}
+            />
+            <PayloadBlock
+              title="Response received"
+              value={selected.responseJson ?? selected.error ?? "response not captured"}
+            />
           </div>
         </div>
       </section>
@@ -769,11 +769,11 @@ function DetailModal({
 
 function PayloadBlock({ title, value }: { title: string; value: string }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-black/30">
-      <div className="border-b border-white/10 px-4 py-3">
+    <section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border border-white/10 bg-black/30">
+      <div className="shrink-0 border-b border-white/10 px-4 py-3">
         <h3 className="text-sm font-semibold text-white">{title}</h3>
       </div>
-      <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-zinc-300">
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-zinc-300">
         {value}
       </pre>
     </section>

@@ -191,10 +191,15 @@ test("filters every store view with a half-open date range", () => {
     assert.equal(includedSummary.totals.requests, 1);
     assert.equal(includedSummary.currentSession.totalTokens, 130);
     assert.equal(includedSummary.byProvider[0].key, "openai");
-    assert.equal(store.listRequests(10, undefined, included).length, 1);
+    assert.equal(includedSummary.byModel[0].key, "gpt-4.1");
+    assert.equal(store.listRequests(10, row.id + 1, included).length, 1);
     assert.equal(store.getUsagePoints(included)[0].totalTokens, 130);
 
-    assert.equal(store.getSummary(excludedAtUpperBoundary).totals.requests, 0);
+    const excludedSummary = store.getSummary(excludedAtUpperBoundary);
+    assert.equal(excludedSummary.totals.requests, 0);
+    assert.equal(excludedSummary.currentSession.totalTokens, 0);
+    assert.deepEqual(excludedSummary.byProvider, []);
+    assert.deepEqual(excludedSummary.byModel, []);
     assert.equal(
       store.listRequests(10, undefined, excludedAtUpperBoundary).length,
       0,

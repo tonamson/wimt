@@ -5,7 +5,7 @@ services:
     container_name: wimt
     restart: unless-stopped
     ports:
-      - "${WIMT_PORT:-3001}:3000"
+      - "${WIMT_PORT:-4393}:4393"
     environment:
       WIMT_DB_PATH: /app/data/wimt.sqlite
       OPENAI_UPSTREAM_BASE_URL: ${OPENAI_UPSTREAM_BASE_URL:-https://api.openai.com}
@@ -13,3 +13,43 @@ services:
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-auto}
     volumes:
       - ./frontend/data:/app/data
+
+  headroom:
+    image: ghcr.io/chopratejas/headroom:latest
+    container_name: headroom
+    command:
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8787"
+      - --backend
+      - anthropic
+      - --anthropic-api-url
+      - "http://wimt:4393"
+      - --log-file
+      - "/root/.headroom/requests.jsonl"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - headroom-data:/root/.headroom
+    restart: unless-stopped
+    depends_on:
+      - wimt
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  headroom-data:

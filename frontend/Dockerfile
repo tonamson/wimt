@@ -13,9 +13,9 @@ COPY . .
 RUN npm run build
 
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=4393
 ENV WIMT_DB_PATH=/app/data/wimt.sqlite
 
-EXPOSE 3000
+EXPOSE 4393
 
 CMD ["npm", "start"]

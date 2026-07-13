@@ -8,21 +8,21 @@ Local Next.js app that works as an AI proxy and token dashboard.
 npm run dev -- --hostname 127.0.0.1
 ```
 
-Open `http://127.0.0.1:3000`.
+Open `http://127.0.0.1:4393`.
 
 ## Point CLIs at the proxy
 
 OpenAI-compatible tools, including Codex-style clients:
 
 ```bash
-export OPENAI_BASE_URL=http://127.0.0.1:3000/v1
+export OPENAI_BASE_URL=http://127.0.0.1:4393/v1
 export OPENAI_API_KEY=sk-...
 ```
 
 Anthropic-compatible tools, including Claude-style clients:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:3000
+export ANTHROPIC_BASE_URL=http://127.0.0.1:4393
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 

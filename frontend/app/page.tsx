@@ -84,9 +84,7 @@ export default function Home() {
   const [visibleEvents, setVisibleEvents] = useState(12);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
-  const [baseUrl] = useState(() =>
-    typeof window === "undefined" ? "http://localhost:3000" : window.location.origin,
-  );
+  const [baseUrl] = useState("http://localhost:4393");
 
   useEffect(() => {
     void loadSettings();
@@ -175,7 +173,7 @@ export default function Home() {
         <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-sky-300">
-              WIMT local proxy
+              Where is my tokens?
             </p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-white">
               Token audit dashboard

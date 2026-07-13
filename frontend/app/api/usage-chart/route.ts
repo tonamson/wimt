@@ -4,12 +4,16 @@ import { getStore } from "@/lib/runtime-store";
 export const runtime = "nodejs";
 
 export function GET(request: Request) {
+  const searchParams = new URL(request.url).searchParams;
+  let range: ReturnType<typeof readDateRange>;
+
   try {
-    const range = readDateRange(new URL(request.url).searchParams);
-    return Response.json({
-      items: getStore().getUsagePoints(range),
-    });
+    range = readDateRange(searchParams);
   } catch (error) {
     return dateRangeErrorResponse(error);
   }
+
+  return Response.json({
+    items: getStore().getUsagePoints(range),
+  });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApexOptions } from "apexcharts";
 import { localDateRange, toDateInputValue } from "@/lib/date-range";
 
@@ -213,6 +213,11 @@ export default function Home() {
     },
     [dateRangeQuery],
   );
+  const latestRefresh = useRef(refresh);
+
+  useLayoutEffect(() => {
+    latestRefresh.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     const today = toDateInputValue(new Date());
@@ -280,7 +285,7 @@ export default function Home() {
 
     await fetch("/api/clear", { method: "POST" });
     setCursorStack([]);
-    await refresh();
+    await latestRefresh.current();
   }
 
   function nextPage() {

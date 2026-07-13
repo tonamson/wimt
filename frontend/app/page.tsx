@@ -221,6 +221,8 @@ export default function Home() {
 
   useEffect(() => {
     const today = toDateInputValue(new Date());
+    // Browser-local today must be initialized after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDateSelection({ from: today, to: today });
     void loadSettings();
   }, [loadSettings]);
@@ -230,6 +232,8 @@ export default function Home() {
       return;
     }
 
+    // Range and cursor changes must start their guarded refresh immediately.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh(currentCursor);
     const interval = window.setInterval(() => {
       if (!requestPending.current) {

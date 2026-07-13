@@ -46,6 +46,14 @@ test("rejects invalid ranges and formats a 400 response", async () => {
     new URLSearchParams({ from: "2026-07-13T00:00:00.000Z" }),
     new URLSearchParams({ from: "invalid", to: "2026-07-14T00:00:00.000Z" }),
     new URLSearchParams({
+      from: "2026-02-30T00:00:00.000Z",
+      to: "2026-03-03T00:00:00.000Z",
+    }),
+    new URLSearchParams({
+      from: "2026-07-13T00:00:00Z",
+      to: "2026-07-14T00:00:00.000Z",
+    }),
+    new URLSearchParams({
       from: "2026-07-14T00:00:00.000Z",
       to: "2026-07-13T00:00:00.000Z",
     }),

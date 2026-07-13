@@ -16,7 +16,13 @@ export function readDateRange(searchParams: URLSearchParams): DateRange | undefi
 
   const fromTime = Date.parse(from);
   const toTime = Date.parse(to);
-  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime) || fromTime >= toTime) {
+  if (
+    !Number.isFinite(fromTime) ||
+    !Number.isFinite(toTime) ||
+    new Date(fromTime).toISOString() !== from ||
+    new Date(toTime).toISOString() !== to ||
+    fromTime >= toTime
+  ) {
     throw new RangeError("Invalid date range");
   }
 

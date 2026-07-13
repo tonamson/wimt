@@ -226,10 +226,11 @@ export default function Home() {
     }
 
     void refresh(currentCursor);
-    const interval = window.setInterval(
-      () => void refresh(currentCursor),
-      2_000,
-    );
+    const interval = window.setInterval(() => {
+      if (!requestPending.current) {
+        void refresh(currentCursor);
+      }
+    }, 2_000);
 
     return () => {
       window.clearInterval(interval);

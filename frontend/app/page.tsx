@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ApexOptions } from "apexcharts";
 
 const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
@@ -130,7 +130,6 @@ export default function Home() {
   const [cursorStack, setCursorStack] = useState<number[]>([]);
   const [chartVisible, setChartVisible] = useState(defaultChartVisible);
   const [selected, setSelected] = useState<RequestRow | null>(null);
-  const [visibleEvents, setVisibleEvents] = useState(12);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
   const [baseUrl] = useState("http://localhost:4393");
@@ -151,11 +150,6 @@ export default function Home() {
     ["Total cache", summary.totals.totalCacheTokens, "text-violet-300"],
     ["Total tokens", summary.totals.totalTokens, "text-white"],
   ];
-
-  const loadedEvents = useMemo(
-    () => requests.slice(0, visibleEvents),
-    [requests, visibleEvents],
-  );
 
   async function refresh() {
     const [summaryResponse, chartResponse] = await Promise.all([
@@ -187,7 +181,6 @@ export default function Home() {
   async function openDetail(row: RequestRow) {
     const response = await fetch(`/api/requests/${row.id}`, { cache: "no-store" });
     setSelected(await response.json());
-    setVisibleEvents(12);
   }
 
   async function saveSettings() {
@@ -235,14 +228,6 @@ export default function Home() {
     const stack = cursorStack.slice(0, -1);
     setCursorStack(stack);
     await loadRequests(stack.at(-1));
-  }
-
-  function loadMoreOnScroll(event: React.UIEvent<HTMLDivElement>) {
-    const target = event.currentTarget;
-
-    if (target.scrollTop + target.clientHeight >= target.scrollHeight - 48) {
-      setVisibleEvents((count) => Math.min(count + 20, requests.length));
-    }
   }
 
   return (
@@ -497,12 +482,9 @@ export default function Home() {
         </section>
       </div>
 
-        {selected ? (
-          <DetailModal
-            selected={selected}
-            events={loadedEvents}
-            allLoaded={visibleEvents >= requests.length}
-            onScroll={loadMoreOnScroll}
+      {selected ? (
+        <DetailModal
+          selected={selected}
           onClose={() => setSelected(null)}
         />
       ) : null}
@@ -716,15 +698,9 @@ function MetricAlert({
 
 function DetailModal({
   selected,
-  events,
-  allLoaded,
-  onScroll,
   onClose,
 }: {
   selected: RequestRow;
-  events: RequestRow[];
-  allLoaded: boolean;
-  onScroll: (event: React.UIEvent<HTMLDivElement>) => void;
   onClose: () => void;
 }) {
   return (
@@ -749,7 +725,7 @@ function DetailModal({
           </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 lg:grid-cols-[1fr_320px]">
+        <div className="min-h-0 flex-1">
           <div className="min-h-0 overflow-auto p-4">
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
@@ -785,44 +761,6 @@ function DetailModal({
               />
             </div>
           </div>
-
-          <aside className="flex min-h-[420px] flex-col border-t border-white/10 lg:border-l lg:border-t-0">
-            <div className="border-b border-white/10 px-4 py-3">
-              <h3 className="text-sm font-semibold text-white">
-                Passive pagination log
-              </h3>
-              <p className="mt-1 text-xs text-zinc-500">
-                Scroll near the bottom to append older requests.
-              </p>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto" onScroll={onScroll}>
-              <div className="divide-y divide-white/10">
-                {events.map((event) => (
-                  <div key={event.id} className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-xs text-zinc-500">
-                          {formatTime(event.createdAt)}
-                        </p>
-                        <p className="mt-1 font-mono text-xs text-zinc-500">
-                          {shortSession(event.sessionId)}
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-zinc-100">
-                          {event.providerSchema} {event.requestPath}
-                        </p>
-                      </div>
-                      <span className="font-mono text-xs text-sky-200">
-                        {formatNumber(event.totalTokens ?? 0)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="px-4 py-3 text-center font-mono text-xs text-zinc-500">
-                {allLoaded ? "end of loaded log" : "scroll for more"}
-              </div>
-            </div>
-          </aside>
         </div>
       </section>
     </div>

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import type { DateRange } from "./date-range";
 
 export type RequestInsert = {
   sessionId: string;
@@ -98,6 +99,8 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS requests_created_at_idx ON requests(created_at);
   `);
 
   const getSetting = (key: string) =>
@@ -203,23 +206,37 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     });
   }
 
-  function getSummary() {
+  function getSummary(range?: DateRange) {
     const current = getCurrentSession();
 
     return {
-      totals: totalsFor(),
+      totals: totalsFor(range),
       currentSession: {
         ...current,
-        ...totalsFor("WHERE session_id = ?", current.id),
+        ...totalsFor(range, current.id),
       },
-      byProvider: groupBy("provider_schema"),
-      byModel: groupBy("model"),
+      byProvider: groupBy("provider_schema", range),
+      byModel: groupBy("model", range),
     };
   }
 
-  function totalsFor(where = "", value?: string) {
-    const stmt = db.prepare(
-      `
+  function totalsFor(range?: DateRange, sessionId?: string) {
+    const filters: string[] = [];
+    const params: string[] = [];
+
+    if (sessionId) {
+      filters.push("session_id = ?");
+      params.push(sessionId);
+    }
+    if (range) {
+      filters.push("created_at >= ?", "created_at < ?");
+      params.push(range.from, range.to);
+    }
+
+    const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+    return db
+      .prepare(
+        `
         SELECT
           COUNT(*) as requests,
           COALESCE(SUM(input_tokens), 0) as inputTokens,
@@ -231,16 +248,14 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           COALESCE(SUM(usage_missing), 0) as usageMissing
         FROM requests ${where}
       `,
-    );
-    const row = (value === undefined ? stmt.get() : stmt.get(value)) as Record<
-      string,
-      number
-    >;
-
-    return row;
+      )
+      .get(...params) as Record<string, number>;
   }
 
-  function groupBy(column: "provider_schema" | "model") {
+  function groupBy(column: "provider_schema" | "model", range?: DateRange) {
+    const where = range ? "WHERE created_at >= ? AND created_at < ?" : "";
+    const params = range ? [range.from, range.to] : [];
+
     return db
       .prepare(
         `
@@ -255,16 +270,29 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           COALESCE(SUM(total_tokens), 0) as totalTokens,
           COALESCE(SUM(usage_missing), 0) as usageMissing
         FROM requests
+        ${where}
         GROUP BY ${column}
         ORDER BY totalTokens DESC
       `,
       )
-      .all() as GroupRow[];
+      .all(...params) as GroupRow[];
   }
 
-  function listRequests(limit = 100, cursor?: number) {
-    const where = cursor === undefined ? "" : "WHERE id < ?";
-    const params = cursor === undefined ? [limit] : [cursor, limit];
+  function listRequests(limit = 100, cursor?: number, range?: DateRange) {
+    const filters: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (cursor !== undefined) {
+      filters.push("id < ?");
+      params.push(cursor);
+    }
+    if (range) {
+      filters.push("created_at >= ?", "created_at < ?");
+      params.push(range.from, range.to);
+    }
+
+    const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+    params.push(limit);
 
     return db
       .prepare(
@@ -307,12 +335,20 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       .get(id) as RequestRow | undefined;
   }
 
-  function getDailyUsagePoints() {
+  function getUsagePoints(range?: DateRange) {
+    const bucket = range
+      ? "strftime('%Y-%m-%dT%H:%M:00.000Z', created_at)"
+      : "strftime('%Y-%m-%dT%H:%M:00.000', created_at, 'localtime')";
+    const where = range
+      ? "WHERE created_at >= ? AND created_at < ?"
+      : "WHERE date(created_at, 'localtime') = date('now', 'localtime')";
+    const params = range ? [range.from, range.to] : [];
+
     return db
       .prepare(
         `
         SELECT
-          strftime('%Y-%m-%dT%H:%M:00.000', created_at, 'localtime') as bucket,
+          ${bucket} as bucket,
           COALESCE(SUM(input_tokens), 0) as inputTokens,
           COALESCE(SUM(output_tokens), 0) as outputTokens,
           COALESCE(SUM(cache_write_tokens), 0) as cacheWriteTokens,
@@ -320,12 +356,12 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           COALESCE(SUM(total_cache_tokens), 0) as totalCacheTokens,
           COALESCE(SUM(total_tokens), 0) as totalTokens
         FROM requests
-        WHERE date(created_at, 'localtime') = date('now', 'localtime')
+        ${where}
         GROUP BY bucket
         ORDER BY bucket ASC
       `,
       )
-      .all() as UsagePoint[];
+      .all(...params) as UsagePoint[];
   }
 
   function clearRequests() {
@@ -380,7 +416,7 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     getSummary,
     listRequests,
     getRequest,
-    getDailyUsagePoints,
+    getUsagePoints,
     clearRequests,
     getSettings,
     updateSettings,

@@ -148,3 +148,60 @@ test("saves upstream settings", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("filters every store view with a half-open date range", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wimt-store-"));
+  const store = createStore(path.join(dir, "test.sqlite"));
+
+  try {
+    store.insertRequest({
+      sessionId: store.getCurrentSession().id,
+      providerSchema: "openai",
+      upstreamBaseUrl: "https://api.openai.com",
+      requestPath: "/v1/responses",
+      method: "POST",
+      model: "gpt-4.1",
+      statusCode: 200,
+      inputTokens: 100,
+      outputTokens: 30,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 40,
+      totalCacheTokens: 40,
+      totalTokens: 130,
+      usageMissing: false,
+      rawUsageJson: "{}",
+      requestJson: "{}",
+      responseJson: "{}",
+      error: null,
+      latencyMs: 25,
+    });
+
+    const row = store.listRequests(1)[0];
+    const createdAt = Date.parse(row.createdAt);
+    const included = {
+      from: row.createdAt,
+      to: new Date(createdAt + 1).toISOString(),
+    };
+    const excludedAtUpperBoundary = {
+      from: new Date(createdAt - 1).toISOString(),
+      to: row.createdAt,
+    };
+
+    const includedSummary = store.getSummary(included);
+    assert.equal(includedSummary.totals.requests, 1);
+    assert.equal(includedSummary.currentSession.totalTokens, 130);
+    assert.equal(includedSummary.byProvider[0].key, "openai");
+    assert.equal(store.listRequests(10, undefined, included).length, 1);
+    assert.equal(store.getUsagePoints(included)[0].totalTokens, 130);
+
+    assert.equal(store.getSummary(excludedAtUpperBoundary).totals.requests, 0);
+    assert.equal(
+      store.listRequests(10, undefined, excludedAtUpperBoundary).length,
+      0,
+    );
+    assert.equal(store.getUsagePoints(excludedAtUpperBoundary).length, 0);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApexOptions } from "apexcharts";
 import { localDateRange, toDateInputValue } from "@/lib/date-range";
 
@@ -143,10 +143,17 @@ export default function Home() {
     from: "",
     to: "",
   });
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const refreshSequence = useRef(0);
+  const requestPending = useRef(false);
 
   const currentCursor = cursorStack.at(-1);
+  const hasValidDateRange =
+    dateSelection.from !== "" &&
+    dateSelection.to !== "" &&
+    dateSelection.from <= dateSelection.to;
   const selectedRange =
-    dateSelection.from && dateSelection.to
+    hasValidDateRange
       ? localDateRange(dateSelection.from, dateSelection.to)
       : undefined;
   const dateRangeQuery = selectedRange
@@ -167,28 +174,42 @@ export default function Home() {
         return;
       }
 
+      const sequence = ++refreshSequence.current;
+      requestPending.current = true;
+      setRequestsLoading(true);
       const requestsQuery = new URLSearchParams(dateRangeQuery);
       requestsQuery.set("limit", String(requestPageSize));
       if (cursor !== undefined) {
         requestsQuery.set("cursor", String(cursor));
       }
 
-      const [summaryResponse, chartResponse, requestsResponse] =
-        await Promise.all([
-          fetch(`/api/summary?${dateRangeQuery}`, { cache: "no-store" }),
-          fetch(`/api/usage-chart?${dateRangeQuery}`, { cache: "no-store" }),
-          fetch(`/api/requests?${requestsQuery}`, { cache: "no-store" }),
+      try {
+        const [summaryResponse, chartResponse, requestsResponse] =
+          await Promise.all([
+            fetch(`/api/summary?${dateRangeQuery}`, { cache: "no-store" }),
+            fetch(`/api/usage-chart?${dateRangeQuery}`, { cache: "no-store" }),
+            fetch(`/api/requests?${requestsQuery}`, { cache: "no-store" }),
+          ]);
+        const [nextSummary, chartPage, requestsPage] = await Promise.all([
+          summaryResponse.json() as Promise<Summary>,
+          chartResponse.json() as Promise<{ items: UsagePoint[] }>,
+          requestsResponse.json() as Promise<RequestsPage>,
         ]);
-      const [nextSummary, chartPage, requestsPage] = await Promise.all([
-        summaryResponse.json() as Promise<Summary>,
-        chartResponse.json() as Promise<{ items: UsagePoint[] }>,
-        requestsResponse.json() as Promise<RequestsPage>,
-      ]);
 
-      setSummary(nextSummary);
-      setChartRows(chartPage.items);
-      setRequests(requestsPage.items);
-      setNextCursor(requestsPage.nextCursor);
+        if (sequence !== refreshSequence.current) {
+          return;
+        }
+
+        setSummary(nextSummary);
+        setChartRows(chartPage.items);
+        setRequests(requestsPage.items);
+        setNextCursor(requestsPage.nextCursor);
+      } finally {
+        if (sequence === refreshSequence.current) {
+          requestPending.current = false;
+          setRequestsLoading(false);
+        }
+      }
     },
     [dateRangeQuery],
   );
@@ -210,7 +231,10 @@ export default function Home() {
       2_000,
     );
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      refreshSequence.current += 1;
+    };
   }, [currentCursor, dateRangeQuery, refresh]);
 
   const metrics = [
@@ -259,14 +283,24 @@ export default function Home() {
   }
 
   function nextPage() {
-    if (nextCursor === null) {
+    if (nextCursor === null || requestPending.current) {
       return;
     }
 
+    refreshSequence.current += 1;
+    requestPending.current = true;
+    setRequestsLoading(true);
     setCursorStack((stack) => [...stack, nextCursor]);
   }
 
   function previousPage() {
+    if (cursorStack.length === 0 || requestPending.current) {
+      return;
+    }
+
+    refreshSequence.current += 1;
+    requestPending.current = true;
+    setRequestsLoading(true);
     setCursorStack((stack) => stack.slice(0, -1));
   }
 
@@ -275,10 +309,22 @@ export default function Home() {
       return;
     }
 
+    const nextSelection = { ...dateSelection, [key]: value };
+    if (
+      nextSelection.from &&
+      nextSelection.to &&
+      nextSelection.from > nextSelection.to
+    ) {
+      return;
+    }
+
+    refreshSequence.current += 1;
+    requestPending.current = true;
+    setRequestsLoading(true);
     setCursorStack([]);
     setRequests([]);
     setNextCursor(null);
-    setDateSelection((current) => ({ ...current, [key]: value }));
+    setDateSelection(nextSelection);
   }
 
   return (
@@ -457,14 +503,14 @@ export default function Home() {
               <button
                 className="rounded-md border border-white/10 px-3 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
                 onClick={previousPage}
-                disabled={cursorStack.length === 0}
+                disabled={cursorStack.length === 0 || requestsLoading}
               >
                 Previous
               </button>
               <button
                 className="rounded-md border border-white/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
                 onClick={nextPage}
-                disabled={nextCursor === null}
+                disabled={nextCursor === null || requestsLoading}
               >
                 Next
               </button>

@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ApexOptions } from "apexcharts";
+import { localDateRange, toDateInputValue } from "@/lib/date-range";
 
 const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
@@ -60,6 +61,11 @@ type RequestRow = {
 type RequestsPage = {
   items: RequestRow[];
   nextCursor: number | null;
+};
+
+type DateSelection = {
+  from: string;
+  to: string;
 };
 
 type UsagePoint = Pick<
@@ -133,14 +139,79 @@ export default function Home() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState("");
   const [baseUrl] = useState("http://localhost:4393");
+  const [dateSelection, setDateSelection] = useState<DateSelection>({
+    from: "",
+    to: "",
+  });
+
+  const currentCursor = cursorStack.at(-1);
+  const selectedRange =
+    dateSelection.from && dateSelection.to
+      ? localDateRange(dateSelection.from, dateSelection.to)
+      : undefined;
+  const dateRangeQuery = selectedRange
+    ? new URLSearchParams({
+        from: selectedRange.from,
+        to: selectedRange.to,
+      }).toString()
+    : "";
+
+  const loadSettings = useCallback(async () => {
+    const settingsResponse = await fetch("/api/settings", { cache: "no-store" });
+    setSettings(await settingsResponse.json());
+  }, []);
+
+  const refresh = useCallback(
+    async (cursor?: number) => {
+      if (!dateRangeQuery) {
+        return;
+      }
+
+      const requestsQuery = new URLSearchParams(dateRangeQuery);
+      requestsQuery.set("limit", String(requestPageSize));
+      if (cursor !== undefined) {
+        requestsQuery.set("cursor", String(cursor));
+      }
+
+      const [summaryResponse, chartResponse, requestsResponse] =
+        await Promise.all([
+          fetch(`/api/summary?${dateRangeQuery}`, { cache: "no-store" }),
+          fetch(`/api/usage-chart?${dateRangeQuery}`, { cache: "no-store" }),
+          fetch(`/api/requests?${requestsQuery}`, { cache: "no-store" }),
+        ]);
+      const [nextSummary, chartPage, requestsPage] = await Promise.all([
+        summaryResponse.json() as Promise<Summary>,
+        chartResponse.json() as Promise<{ items: UsagePoint[] }>,
+        requestsResponse.json() as Promise<RequestsPage>,
+      ]);
+
+      setSummary(nextSummary);
+      setChartRows(chartPage.items);
+      setRequests(requestsPage.items);
+      setNextCursor(requestsPage.nextCursor);
+    },
+    [dateRangeQuery],
+  );
 
   useEffect(() => {
+    const today = toDateInputValue(new Date());
+    setDateSelection({ from: today, to: today });
     void loadSettings();
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 2_000);
+  }, [loadSettings]);
+
+  useEffect(() => {
+    if (!dateRangeQuery) {
+      return;
+    }
+
+    void refresh(currentCursor);
+    const interval = window.setInterval(
+      () => void refresh(currentCursor),
+      2_000,
+    );
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [currentCursor, dateRangeQuery, refresh]);
 
   const metrics = [
     ["Input", summary.totals.inputTokens, "text-sky-300"],
@@ -150,33 +221,6 @@ export default function Home() {
     ["Total cache", summary.totals.totalCacheTokens, "text-violet-300"],
     ["Total tokens", summary.totals.totalTokens, "text-white"],
   ];
-
-  async function refresh() {
-    const [summaryResponse, chartResponse] = await Promise.all([
-      fetch("/api/summary", { cache: "no-store" }),
-      fetch("/api/usage-chart", { cache: "no-store" }),
-    ]);
-
-    setSummary(await summaryResponse.json());
-    setChartRows(((await chartResponse.json()) as { items: UsagePoint[] }).items);
-    await loadRequests(cursorStack.at(-1));
-  }
-
-  async function loadRequests(cursor?: number) {
-    const requestsResponse = await fetch(
-      `/api/requests?limit=${requestPageSize}${cursor ? `&cursor=${cursor}` : ""}`,
-      { cache: "no-store" },
-    );
-    const page = (await requestsResponse.json()) as RequestsPage;
-
-    setRequests(page.items);
-    setNextCursor(page.nextCursor);
-  }
-
-  async function loadSettings() {
-    const settingsResponse = await fetch("/api/settings", { cache: "no-store" });
-    setSettings(await settingsResponse.json());
-  }
 
   async function openDetail(row: RequestRow) {
     const response = await fetch(`/api/requests/${row.id}`, { cache: "no-store" });
@@ -214,20 +258,27 @@ export default function Home() {
     await refresh();
   }
 
-  async function nextPage() {
+  function nextPage() {
     if (nextCursor === null) {
       return;
     }
 
-    const stack = [...cursorStack, nextCursor];
-    setCursorStack(stack);
-    await loadRequests(nextCursor);
+    setCursorStack((stack) => [...stack, nextCursor]);
   }
 
-  async function previousPage() {
-    const stack = cursorStack.slice(0, -1);
-    setCursorStack(stack);
-    await loadRequests(stack.at(-1));
+  function previousPage() {
+    setCursorStack((stack) => stack.slice(0, -1));
+  }
+
+  function updateDateSelection(key: keyof DateSelection, value: string) {
+    if (!value) {
+      return;
+    }
+
+    setCursorStack([]);
+    setRequests([]);
+    setNextCursor(null);
+    setDateSelection((current) => ({ ...current, [key]: value }));
   }
 
   return (
@@ -245,7 +296,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <button
               className="rounded-md border border-white/10 bg-white px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200 active:translate-y-px"
-              onClick={refresh}
+              onClick={() => void refresh(currentCursor)}
             >
               Refresh
             </button>
@@ -257,6 +308,38 @@ export default function Home() {
             </button>
           </div>
         </header>
+
+        <section
+          aria-label="Date range"
+          className="flex flex-wrap items-end gap-3 border-b border-white/10 py-3"
+        >
+          <label className="grid gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+            From
+            <input
+              type="date"
+              required
+              value={dateSelection.from}
+              max={dateSelection.to || undefined}
+              onChange={(event) =>
+                updateDateSelection("from", event.target.value)
+              }
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-sky-400/60"
+            />
+          </label>
+          <label className="grid gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+            To
+            <input
+              type="date"
+              required
+              value={dateSelection.to}
+              min={dateSelection.from || undefined}
+              onChange={(event) =>
+                updateDateSelection("to", event.target.value)
+              }
+              className="rounded-md border border-white/10 bg-black/30 px-3 py-2 font-mono text-sm text-zinc-200 outline-none [color-scheme:dark] focus:border-sky-400/60"
+            />
+          </label>
+        </section>
 
         <section className="grid gap-3 py-4 sm:grid-cols-2 lg:grid-cols-6">
           {metrics.map(([label, value, tone]) => (
@@ -535,7 +618,7 @@ function RequestChart({
     legend: { show: false },
     markers: { size: rows.length <= 30 ? 3 : 0 },
     noData: {
-      text: "No request data today",
+      text: "No request data in selected range",
       style: { color: "#71717a" },
     },
     stroke: {
@@ -603,7 +686,7 @@ function RequestChart({
       </div>
       <div className="flex justify-between font-mono text-xs text-zinc-500">
         <span>{rows[0] ? formatTime(rows[0].bucket) : "-"}</span>
-        <span>today</span>
+        <span>selected range</span>
         <span>{rows.at(-1) ? formatTime(rows.at(-1)!.bucket) : "-"}</span>
       </div>
     </div>

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   dateRangeErrorResponse,
@@ -66,4 +69,41 @@ test("rejects invalid ranges and formats a 400 response", async () => {
   const response = dateRangeErrorResponse(new RangeError("Invalid date range"));
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: "Invalid date range" });
+});
+
+test("dashboard routes reject invalid date ranges", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wimt-routes-"));
+  const previousDbPath = process.env.WIMT_DB_PATH;
+  process.env.WIMT_DB_PATH = path.join(dir, "test.sqlite");
+
+  try {
+    const handlers = [
+      (await import("../app/api/summary/route")).GET,
+      (await import("../app/api/requests/route")).GET,
+      (await import("../app/api/usage-chart/route")).GET,
+    ] as Array<(request: Request) => Response>;
+    const invalidQueries = [
+      "from=2026-07-13T00:00:00.000Z",
+      "from=invalid&to=2026-07-14T00:00:00.000Z",
+      "from=2026-07-14T00:00:00.000Z&to=2026-07-13T00:00:00.000Z",
+    ];
+
+    for (const handler of handlers) {
+      for (const query of invalidQueries) {
+        const response = handler(new Request(`http://localhost/api/test?${query}`));
+        assert.equal(response.status, 400);
+        assert.equal(
+          typeof ((await response.json()) as { error: string }).error,
+          "string",
+        );
+      }
+    }
+  } finally {
+    if (previousDbPath === undefined) {
+      delete process.env.WIMT_DB_PATH;
+    } else {
+      process.env.WIMT_DB_PATH = previousDbPath;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

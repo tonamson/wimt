@@ -28,30 +28,47 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 The proxy endpoint is `/v1/*`. It forwards to the configured upstream and logs usage into SQLite.
 
-## Configure upstream providers
+## Configure
 
-Defaults:
+All env vars are documented in the repo-root [`.env.example`](../.env.example).
 
 ```bash
-export OPENAI_UPSTREAM_BASE_URL=https://api.openai.com
-export ANTHROPIC_UPSTREAM_BASE_URL=https://api.anthropic.com
-export DEFAULT_PROVIDER=auto
+# From repo root
+cp .env.example .env
+# edit .env, then either export vars or run under Docker Compose
 ```
 
-The dashboard also has inputs for changing OpenAI and Anthropic upstream base URLs at runtime. Use this for OpenAI-compatible or Anthropic-compatible third-party providers.
+Useful keys:
 
-## Data
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPENAI_UPSTREAM_BASE_URL` | `https://api.openai.com` | Upstream OpenAI-compatible API |
+| `ANTHROPIC_UPSTREAM_BASE_URL` | `https://api.anthropic.com` | Upstream Anthropic-compatible API |
+| `DEFAULT_PROVIDER` | `auto` | `auto` \| `openai` \| `anthropic` |
+| `WIMT_DB_PATH` | `frontend/data/wimt.sqlite` | SQLite path (local dev) |
+| `WIMT_RETENTION_DAYS` | `14` | Auto-delete request logs older than N days |
+| `WIMT_LOG_BODIES` | `1` | `0` = usage only, no request/response bodies |
+| `WIMT_LOG_BODY_MAX` | `8000` | Max chars per body snapshot |
+| `PROXY_PUBLIC_BASE_URL` | `http://127.0.0.1:8787` | CLI entry shown in dashboard (Headroom) |
+| `WIMT_DEBUG_USAGE` | off | Set `1` to log normalized usage |
 
-SQLite file defaults to:
+The dashboard can also change OpenAI/Anthropic upstream URLs at runtime.
+
+### Sessions
+
+- **Measurement session** (`ses_…`): set by WIMT (`POST /api/session` starts a
+  new window without clearing history). Dashboard “current session” totals use this.
+- **CLI session**: UUID extracted from Claude/Codex request metadata when present;
+  shown in the request log for conversation grouping.
+
+## Docker
+
+Ports bind to **127.0.0.1** only (not LAN). Config comes from `.env`:
 
 ```bash
-frontend/data/wimt.sqlite
-```
-
-Override it with:
-
-```bash
-export WIMT_DB_PATH=/absolute/path/to/wimt.sqlite
+# repo root
+cp .env.example .env
+docker compose up --build
 ```
 
 ## Checks

@@ -1,5 +1,6 @@
+import { bodyMaxChars, shouldLogBodies } from "./body-log";
 import { getStore } from "./runtime-store";
-import { normalizeUsage, normalizeUsageFromSse } from "./usage";
+import { createSseUsageParser, normalizeUsage } from "./usage";
 
 type Provider = "openai" | "anthropic";
 
@@ -35,7 +36,11 @@ export async function proxyAiRequest(
 
   const requestText = await request.text();
   const model = readModel(requestText);
-  const sessionId = readCliSessionId(requestText) ?? "unknown";
+  // Measurement window (WIMT session) — startSession() resets this without clearing logs.
+  const sessionId = store.getCurrentSession().id;
+  // CLI conversation id when present (Claude/Codex metadata).
+  const cliSessionId = readCliSessionId(requestText);
+  const requestJson = captureBodyJson(requestText, null);
 
   try {
     const upstreamResponse = await fetch(upstreamUrl, {
@@ -54,6 +59,7 @@ export async function proxyAiRequest(
       const [clientBody, logBody] = body ? body.tee() : [null, null];
       const requestId = store.insertRequest({
         sessionId,
+        cliSessionId,
         providerSchema: provider,
         upstreamBaseUrl,
         requestPath,
@@ -68,13 +74,29 @@ export async function proxyAiRequest(
         totalTokens: 0,
         usageMissing: true,
         rawUsageJson: null,
-        requestJson: sanitizeJsonText(requestText, null),
-        responseJson: "[stream logging...]",
+        requestJson,
+        responseJson: shouldLogBodies() ? "[stream logging...]" : null,
         error: null,
         latencyMs: Date.now() - started,
       });
 
-      void logStreamUsage(logBody, requestId, provider, started).catch(() => {});
+      void logStreamUsage(logBody, requestId, provider, started).catch((error) => {
+        const message = error instanceof Error ? error.message : "stream log error";
+        getStore().updateRequestUsage(requestId, {
+          providerSchema: provider,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheWriteTokens: 0,
+          cacheReadTokens: 0,
+          totalCacheTokens: 0,
+          totalTokens: 0,
+          usageMissing: true,
+          rawUsageJson: null,
+          responseJson: null,
+          latencyMs: Date.now() - started,
+          error: message,
+        });
+      });
 
       return new Response(clientBody, {
         status: upstreamResponse.status,
@@ -85,6 +107,7 @@ export async function proxyAiRequest(
     if (!contentType.includes("application/json")) {
       store.insertRequest({
         sessionId,
+        cliSessionId,
         providerSchema: provider,
         upstreamBaseUrl,
         requestPath,
@@ -99,7 +122,7 @@ export async function proxyAiRequest(
         totalTokens: 0,
         usageMissing: true,
         rawUsageJson: null,
-        requestJson: sanitizeJsonText(requestText, null),
+        requestJson,
         responseJson: null,
         error: null,
         latencyMs: Date.now() - started,
@@ -118,6 +141,7 @@ export async function proxyAiRequest(
 
     store.insertRequest({
       sessionId,
+      cliSessionId,
       providerSchema: normalized.schema === "unknown" ? provider : normalized.schema,
       upstreamBaseUrl,
       requestPath,
@@ -133,8 +157,8 @@ export async function proxyAiRequest(
       usageMissing: normalized.usageMissing,
       rawUsageJson:
         normalized.rawUsage === null ? null : JSON.stringify(normalized.rawUsage),
-      requestJson: sanitizeJsonText(requestText, null),
-      responseJson: sanitizeJsonText(responseText),
+      requestJson,
+      responseJson: captureBodyJson(responseText),
       error: upstreamResponse.ok ? null : responseText.slice(0, 500),
       latencyMs: Date.now() - started,
     });
@@ -148,6 +172,7 @@ export async function proxyAiRequest(
 
     store.insertRequest({
       sessionId,
+      cliSessionId,
       providerSchema: provider,
       upstreamBaseUrl,
       requestPath,
@@ -162,7 +187,7 @@ export async function proxyAiRequest(
       totalTokens: 0,
       usageMissing: true,
       rawUsageJson: null,
-      requestJson: sanitizeJsonText(requestText, null),
+      requestJson,
       responseJson: null,
       error: message,
       latencyMs: Date.now() - started,
@@ -182,8 +207,38 @@ async function logStreamUsage(
     return;
   }
 
-  const text = await new Response(body).text();
-  const normalized = normalizeUsageFromSse(text);
+  const parser = createSseUsageParser();
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const maxBody = bodyMaxChars();
+  let responseSnippet = "";
+  const captureResponse = shouldLogBodies() && maxBody > 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const chunk = decoder.decode(value, { stream: true });
+    parser.push(chunk);
+
+    if (captureResponse && responseSnippet.length < maxBody) {
+      const remaining = maxBody - responseSnippet.length;
+      responseSnippet += chunk.slice(0, remaining);
+    }
+  }
+
+  // Flush decoder tail (multi-byte chars at chunk boundary).
+  const tail = decoder.decode();
+  if (tail) {
+    parser.push(tail);
+    if (captureResponse && responseSnippet.length < maxBody) {
+      responseSnippet += tail.slice(0, maxBody - responseSnippet.length);
+    }
+  }
+
+  const normalized = parser.finish();
   debugUsage(provider, "stream", normalized);
 
   getStore().updateRequestUsage(requestId, {
@@ -197,8 +252,9 @@ async function logStreamUsage(
     usageMissing: normalized.usageMissing,
     rawUsageJson:
       normalized.rawUsage === null ? null : JSON.stringify(normalized.rawUsage),
-    responseJson: text.slice(0, 50_000),
+    responseJson: captureResponse ? responseSnippet || null : null,
     latencyMs: Date.now() - started,
+    error: null,
   });
 }
 
@@ -226,7 +282,7 @@ function debugUsage(
   });
 }
 
-function pickProvider(
+export function pickProvider(
   request: Request,
   path: string,
   defaultProvider: string,
@@ -352,7 +408,7 @@ function isUuid(value: string) {
   );
 }
 
-export function sanitizeJsonText(text: string, maxLength: number | null = 50_000) {
+export function sanitizeJsonText(text: string, maxLength: number | null = bodyMaxChars()) {
   const parsed = parseJson(text);
 
   if (!parsed) {
@@ -360,6 +416,13 @@ export function sanitizeJsonText(text: string, maxLength: number | null = 50_000
   }
 
   return limitText(JSON.stringify(maskSecrets(parsed), null, 2), maxLength);
+}
+
+function captureBodyJson(text: string, maxLength: number | null = bodyMaxChars()) {
+  if (!shouldLogBodies()) {
+    return null;
+  }
+  return sanitizeJsonText(text, maxLength);
 }
 
 function limitText(text: string, maxLength: number | null) {

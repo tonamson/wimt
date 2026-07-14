@@ -25,19 +25,26 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
     const details = isRecord(usage.prompt_tokens_details)
       ? usage.prompt_tokens_details
       : {};
+    const inputTokens = numberOrZero(usage.prompt_tokens);
+    const outputTokens = numberOrZero(usage.completion_tokens);
     const cacheReadTokens = numberOrZero(details.cached_tokens);
     const cacheWriteTokens = numberOrZero(
       details.cache_write_tokens ?? details.cache_creation_tokens,
     );
+    // OpenAI total_tokens is prompt+completion (cache is a subset of prompt).
+    // Prefer provider total when present; otherwise sum input+output only.
+    const totalTokens = isNumber(usage.total_tokens)
+      ? usage.total_tokens
+      : inputTokens + outputTokens;
 
     return {
       schema: "openai",
-      inputTokens: numberOrZero(usage.prompt_tokens),
-      outputTokens: numberOrZero(usage.completion_tokens),
+      inputTokens,
+      outputTokens,
       cacheWriteTokens,
       cacheReadTokens,
       totalCacheTokens: cacheWriteTokens + cacheReadTokens,
-      totalTokens: numberOrZero(usage.total_tokens),
+      totalTokens,
       rawUsage: usage,
       usageMissing: false,
     };
@@ -56,7 +63,9 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
       cacheWriteTokens,
       cacheReadTokens,
       totalCacheTokens: cacheWriteTokens + cacheReadTokens,
-      totalTokens: inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens,
+      // Anthropic does not return a single total; cache fields are billed separately.
+      totalTokens:
+        inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens,
       rawUsage: usage,
       usageMissing: false,
     };
@@ -65,23 +74,35 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
   return emptyUsage(false, usage);
 }
 
+/** Parse a complete SSE payload string (tests / small buffers). */
 export function normalizeUsageFromSse(text: string): NormalizedUsage {
+  const parser = createSseUsageParser();
+  parser.push(text);
+  return parser.finish();
+}
+
+/**
+ * Incremental SSE usage parser — feed chunks as they arrive; only keeps the
+ * latest non-missing usage event (no full-stream string in memory).
+ */
+export function createSseUsageParser() {
+  let buffer = "";
   let latest = emptyUsage(true, null);
 
-  for (const event of text.split(/\n\n+/)) {
-    const data = event
+  function consumeEventBlock(block: string) {
+    const data = block
       .split(/\r?\n/)
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trimStart())
       .join("\n");
 
     if (!data || data === "[DONE]") {
-      continue;
+      return;
     }
 
     const json = parseJson(data);
     if (!json) {
-      continue;
+      return;
     }
 
     const normalized = normalizeUsage(json);
@@ -90,7 +111,26 @@ export function normalizeUsageFromSse(text: string): NormalizedUsage {
     }
   }
 
-  return latest;
+  return {
+    push(chunk: string) {
+      buffer += chunk;
+      const parts = buffer.split(/\n\n+/);
+      buffer = parts.pop() ?? "";
+      for (const part of parts) {
+        consumeEventBlock(part);
+      }
+    },
+    finish(): NormalizedUsage {
+      if (buffer.trim()) {
+        consumeEventBlock(buffer);
+        buffer = "";
+      }
+      return latest;
+    },
+    getLatest(): NormalizedUsage {
+      return latest;
+    },
+  };
 }
 
 function getUsage(value: unknown): JsonRecord | null {

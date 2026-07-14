@@ -3,9 +3,17 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DateRange } from "./date-range";
+import {
+  PURGE_CHECK_INTERVAL_MS,
+  retentionCutoffIso,
+  retentionDaysFromEnv,
+} from "./retention";
 
 export type RequestInsert = {
   sessionId: string;
+  cliSessionId?: string | null;
+  /** Override for tests / import; defaults to now. */
+  createdAt?: string;
   providerSchema: string;
   upstreamBaseUrl: string;
   requestPath: string;
@@ -43,10 +51,11 @@ type GroupRow = {
   usageMissing: number | null;
 };
 
-type RequestRow = Omit<RequestInsert, "usageMissing"> & {
+type RequestRow = Omit<RequestInsert, "usageMissing" | "cliSessionId"> & {
   id: number;
   createdAt: string;
   usageMissing: number;
+  cliSessionId: string | null;
 };
 
 type UsagePoint = {
@@ -101,7 +110,10 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     );
 
     CREATE INDEX IF NOT EXISTS requests_created_at_idx ON requests(created_at);
+    CREATE INDEX IF NOT EXISTS requests_session_id_idx ON requests(session_id);
   `);
+
+  migrateSchema(db);
 
   const getSetting = (key: string) =>
     db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
@@ -113,6 +125,43 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `);
+
+  function maybePurgeExpired(force = false) {
+    const days = retentionDaysFromEnv();
+    const lastPurge = getSetting("last_purge_at")?.value;
+    const lastPurgeMs = lastPurge ? Date.parse(lastPurge) : Number.NaN;
+    const due =
+      force ||
+      !Number.isFinite(lastPurgeMs) ||
+      Date.now() - lastPurgeMs >= PURGE_CHECK_INTERVAL_MS;
+
+    if (!due) {
+      return { deleted: 0, days, skipped: true as const };
+    }
+
+    const cutoff = retentionCutoffIso(days);
+    const result = db
+      .prepare("DELETE FROM requests WHERE created_at < ?")
+      .run(cutoff);
+    setSetting.run("last_purge_at", new Date().toISOString());
+
+    // Drop measurement sessions that no longer have any requests (keep current).
+    const currentId = getSetting("current_session_id")?.value;
+    if (currentId) {
+      db.prepare(
+        `
+        DELETE FROM sessions
+        WHERE id != ?
+          AND id NOT IN (SELECT DISTINCT session_id FROM requests)
+      `,
+      ).run(currentId);
+    }
+
+    return { deleted: Number(result.changes), days, skipped: false as const };
+  }
+
+  // Startup purge so long-running DBs shrink without waiting for traffic.
+  maybePurgeExpired(true);
 
   function getCurrentSession(): Session {
     const current = getSetting("current_session_id")?.value;
@@ -146,22 +195,25 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
   }
 
   function insertRequest(request: RequestInsert) {
+    maybePurgeExpired(false);
+
     const result = db.prepare(`
       INSERT INTO requests (
-        session_id, created_at, provider_schema, upstream_base_url, request_path,
+        session_id, cli_session_id, created_at, provider_schema, upstream_base_url, request_path,
         method, model, status_code, input_tokens, output_tokens, cache_write_tokens,
         cache_read_tokens, total_cache_tokens, total_tokens, usage_missing,
         raw_usage_json, request_json, response_json, error, latency_ms
       )
       VALUES (
-        @sessionId, @createdAt, @providerSchema, @upstreamBaseUrl, @requestPath,
+        @sessionId, @cliSessionId, @createdAt, @providerSchema, @upstreamBaseUrl, @requestPath,
         @method, @model, @statusCode, @inputTokens, @outputTokens, @cacheWriteTokens,
         @cacheReadTokens, @totalCacheTokens, @totalTokens, @usageMissing,
         @rawUsageJson, @requestJson, @responseJson, @error, @latencyMs
       )
     `).run({
       ...request,
-      createdAt: new Date().toISOString(),
+      cliSessionId: request.cliSessionId ?? null,
+      createdAt: request.createdAt ?? new Date().toISOString(),
       usageMissing: request.usageMissing ? 1 : 0,
     });
 
@@ -183,6 +235,7 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       | "rawUsageJson"
       | "responseJson"
       | "latencyMs"
+      | "error"
     >,
   ) {
     db.prepare(`
@@ -197,11 +250,13 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
           usage_missing = @usageMissing,
           raw_usage_json = @rawUsageJson,
           response_json = @responseJson,
-          latency_ms = @latencyMs
+          latency_ms = @latencyMs,
+          error = COALESCE(@error, error)
       WHERE id = @id
     `).run({
       id,
       ...usage,
+      error: usage.error ?? null,
       usageMissing: usage.usageMissing ? 1 : 0,
     });
   }
@@ -217,10 +272,22 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       },
       byProvider: groupBy("provider_schema", range),
       byModel: groupBy("model", range),
+      upstreamErrors: countUpstreamErrors(range),
     };
   }
 
-  function totalsFor(range?: DateRange, sessionId?: string) {
+  type TotalsRow = {
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheWriteTokens: number;
+    cacheReadTokens: number;
+    totalCacheTokens: number;
+    totalTokens: number;
+    usageMissing: number;
+  };
+
+  function totalsFor(range?: DateRange, sessionId?: string): TotalsRow {
     const filters: string[] = [];
     const params: string[] = [];
 
@@ -249,7 +316,29 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
         FROM requests ${where}
       `,
       )
-      .get(...params) as Record<string, number>;
+      .get(...params) as TotalsRow;
+  }
+
+  function countUpstreamErrors(range?: DateRange) {
+    const filters = ["error IS NOT NULL AND error != ''"];
+    const params: string[] = [];
+
+    if (range) {
+      filters.push("created_at >= ?", "created_at < ?");
+      params.push(range.from, range.to);
+    }
+
+    const row = db
+      .prepare(
+        `
+        SELECT COUNT(*) as count
+        FROM requests
+        WHERE ${filters.join(" AND ")}
+      `,
+      )
+      .get(...params) as { count: number };
+
+    return Number(row.count);
   }
 
   function groupBy(column: "provider_schema" | "model", range?: DateRange) {
@@ -298,7 +387,8 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       .prepare(
         `
         SELECT
-          id, session_id as sessionId, created_at as createdAt,
+          id, session_id as sessionId, cli_session_id as cliSessionId,
+          created_at as createdAt,
           provider_schema as providerSchema, upstream_base_url as upstreamBaseUrl,
           request_path as requestPath, method, model, status_code as statusCode,
           input_tokens as inputTokens, output_tokens as outputTokens,
@@ -319,7 +409,8 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
       .prepare(
         `
         SELECT
-          id, session_id as sessionId, created_at as createdAt,
+          id, session_id as sessionId, cli_session_id as cliSessionId,
+          created_at as createdAt,
           provider_schema as providerSchema, upstream_base_url as upstreamBaseUrl,
           request_path as requestPath, method, model, status_code as statusCode,
           input_tokens as inputTokens, output_tokens as outputTokens,
@@ -336,9 +427,10 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
   }
 
   function getUsagePoints(range?: DateRange) {
+    // Hourly buckets keep the trend chart readable (minute points get too dense).
     const bucket = range
-      ? "strftime('%Y-%m-%dT%H:%M:00.000Z', created_at)"
-      : "strftime('%Y-%m-%dT%H:%M:00.000', created_at, 'localtime')";
+      ? "strftime('%Y-%m-%dT%H:00:00.000Z', created_at)"
+      : "strftime('%Y-%m-%dT%H:00:00.000', created_at, 'localtime')";
     const where = range
       ? "WHERE created_at >= ? AND created_at < ?"
       : "WHERE date(created_at, 'localtime') = date('now', 'localtime')";
@@ -383,6 +475,7 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
         process.env.DEFAULT_PROVIDER ??
         "auto",
       currentSession: getCurrentSession(),
+      retentionDays: retentionDaysFromEnv(),
     };
   }
 
@@ -420,7 +513,24 @@ export function createStore(dbPath = process.env.WIMT_DB_PATH ?? DEFAULT_DB_PATH
     clearRequests,
     getSettings,
     updateSettings,
+    purgeExpired: () => maybePurgeExpired(true),
   };
 }
 
 export type WimtStore = ReturnType<typeof createStore>;
+
+function migrateSchema(db: InstanceType<typeof Database>) {
+  const columns = db
+    .prepare("PRAGMA table_info(requests)")
+    .all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+
+  if (!names.has("cli_session_id")) {
+    db.exec("ALTER TABLE requests ADD COLUMN cli_session_id TEXT");
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS requests_session_id_idx ON requests(session_id);
+    CREATE INDEX IF NOT EXISTS requests_cli_session_id_idx ON requests(cli_session_id);
+  `);
+}

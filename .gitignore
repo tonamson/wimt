@@ -1,3 +1,8 @@
 # Added by code-review-graph
 .code-review-graph/
 .superpowers/
+
+# Local secrets / overrides (keep .env.example)
+.env
+.env.local
+.env.*.local

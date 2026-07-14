@@ -62,7 +62,10 @@ test("advances to the next local midnight across a DST transition", () => {
 });
 
 test("clear logs refreshes through the latest committed range callback", () => {
-  const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const source = readFileSync(
+    new URL("../lib/use-dashboard-data.ts", import.meta.url),
+    "utf8",
+  );
   const clearLogs = source.match(/async function clearLogs\(\) \{[\s\S]*?\n  \}/)?.[0];
 
   assert.ok(clearLogs);
@@ -77,7 +80,7 @@ test("clear logs refreshes through the latest committed range callback", () => {
     "latest refresh ref is not updated after each committed range",
   );
   assert.ok(
-    clearLogs.includes("await latestRefresh.current();"),
+    clearLogs.includes("await latestRefresh.current(undefined, { mode: \"hard\" });"),
     "clear logs still calls a captured refresh callback",
   );
 });

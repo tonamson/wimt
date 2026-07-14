@@ -1,26 +1,177 @@
 @import "tailwindcss";
 
+/* Class-based dark mode for manual + system theme control */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  --bg: #f4f4f5;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --text-subtle: #a1a1aa;
+  --accent: #0284c7;
+  --accent-fg: #ffffff;
+  --accent-muted: #e0f2fe;
+  --danger: #e11d48;
+  --danger-muted: #ffe4e6;
+  --danger-fg: #9f1239;
+  --warning: #d97706;
+  --warning-muted: #fef3c7;
+  --warning-fg: #92400e;
+  --success: #059669;
+  --success-muted: #d1fae5;
+  --success-fg: #065f46;
+  --focus-ring: #0284c7;
+  --shadow: 0 1px 2px rgb(24 24 27 / 0.05), 0 1px 3px rgb(24 24 27 / 0.08);
+  --overlay: rgb(24 24 27 / 0.45);
+  --chart-grid: rgb(24 24 27 / 0.08);
+  --chart-axis: #a1a1aa;
+  --chart-fore: #71717a;
+  --table-sticky: #ffffff;
+  --radius-control: 0.5rem;
+  --radius-panel: 0.75rem;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: #09090b;
+  --bg-elevated: #0c0c0f;
+  --surface: #18181b;
+  --surface-muted: #121214;
+  --border: rgb(255 255 255 / 0.1);
+  --border-strong: rgb(255 255 255 / 0.16);
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --accent: #38bdf8;
+  --accent-fg: #0c4a6e;
+  --accent-muted: rgb(56 189 248 / 0.12);
+  --danger: #fb7185;
+  --danger-muted: rgb(251 113 133 / 0.12);
+  --danger-fg: #fecdd3;
+  --warning: #fbbf24;
+  --warning-muted: rgb(251 191 36 / 0.12);
+  --warning-fg: #fde68a;
+  --success: #34d399;
+  --success-muted: rgb(52 211 153 / 0.12);
+  --success-fg: #a7f3d0;
+  --focus-ring: #38bdf8;
+  --shadow: none;
+  --overlay: rgb(0 0 0 / 0.65);
+  --chart-grid: rgb(255 255 255 / 0.08);
+  --chart-axis: #71717a;
+  --chart-fore: #a1a1aa;
+  --table-sticky: #18181b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-muted: var(--accent-muted);
+  --color-danger: var(--danger);
+  --color-danger-muted: var(--danger-muted);
+  --color-danger-fg: var(--danger-fg);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-warning-fg: var(--warning-fg);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-success-fg: var(--success-fg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --radius-control: var(--radius-control);
+  --radius-panel: var(--radius-panel);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
+}
+
+html {
+  height: 100%;
+  overflow-x: hidden;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Dense dashboard scrollbars */
+.dashboard-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.dashboard-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dashboard-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+/* Modal enter (respect reduced motion) */
+@media (prefers-reduced-motion: no-preference) {
+  .modal-backdrop-enter {
+    animation: fade-in 120ms ease-out;
+  }
+
+  .modal-panel-enter {
+    animation: scale-in 140ms ease-out;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Date inputs follow active theme color-scheme */
+input[type="date"] {
+  color-scheme: light dark;
+}
+
+.dark input[type="date"] {
+  color-scheme: dark;
+}
+
+:root:not(.dark) input[type="date"] {
+  color-scheme: light;
 }

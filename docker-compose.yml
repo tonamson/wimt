@@ -1,3 +1,4 @@
+# Config: copy .env.example → .env (Compose loads .env for ${VAR} substitution).
 services:
   wimt:
     build:
@@ -5,12 +6,17 @@ services:
     container_name: wimt
     restart: unless-stopped
     ports:
-      - "${WIMT_PORT:-4393}:4393"
+      - "127.0.0.1:${WIMT_PORT:-4393}:4393"
     environment:
       WIMT_DB_PATH: /app/data/wimt.sqlite
+      PROXY_PUBLIC_BASE_URL: ${PROXY_PUBLIC_BASE_URL:-http://127.0.0.1:8787}
       OPENAI_UPSTREAM_BASE_URL: ${OPENAI_UPSTREAM_BASE_URL:-https://api.openai.com}
       ANTHROPIC_UPSTREAM_BASE_URL: ${ANTHROPIC_UPSTREAM_BASE_URL:-https://api.anthropic.com}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-auto}
+      WIMT_RETENTION_DAYS: ${WIMT_RETENTION_DAYS:-14}
+      WIMT_LOG_BODIES: ${WIMT_LOG_BODIES:-1}
+      WIMT_LOG_BODY_MAX: ${WIMT_LOG_BODY_MAX:-8000}
+      WIMT_DEBUG_USAGE: ${WIMT_DEBUG_USAGE:-}
     volumes:
       - ./frontend/data:/app/data
 
@@ -29,7 +35,7 @@ services:
       - --log-file
       - "/root/.headroom/requests.jsonl"
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:${HEADROOM_PORT:-8787}:8787"
     volumes:
       - headroom-data:/root/.headroom
     restart: unless-stopped

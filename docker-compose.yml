@@ -20,10 +20,24 @@ services:
     volumes:
       - ./frontend/data:/app/data
 
+  # Headroom proxy: built from PyPI (pip install headroom-ai[proxy]), not GHCR image.
+  # Docs: https://headroom-docs.vercel.app/docs/quickstart
+  #        https://headroom-docs.vercel.app/docs/proxy#docker
+  #
+  # Always reinstall latest on rebuild:
+  #   HEADROOM_CACHEBUST=$(date +%s) docker compose build headroom
+  # Or pin a version:
+  #   HEADROOM_VERSION=0.32.0 docker compose build headroom
   headroom:
-    image: ghcr.io/chopratejas/headroom:latest
+    build:
+      context: ./headroom
+      args:
+        HEADROOM_CACHEBUST: ${HEADROOM_CACHEBUST:-0}
+        HEADROOM_VERSION: ${HEADROOM_VERSION:-}
     container_name: headroom
     command:
+      - headroom
+      - proxy
       - --host
       - "0.0.0.0"
       - --port

@@ -49,7 +49,7 @@ Useful keys:
 | `WIMT_RETENTION_DAYS` | `14` | Auto-delete request logs older than N days |
 | `WIMT_LOG_BODIES` | `1` | `0` = usage only, no request/response bodies |
 | `WIMT_LOG_BODY_MAX` | `8000` | Max chars per body snapshot |
-| `PROXY_PUBLIC_BASE_URL` | `http://127.0.0.1:8787` | CLI entry shown in dashboard (Headroom) |
+| `PROXY_PUBLIC_BASE_URL` | `http://127.0.0.1:4393` | CLI entry shown in dashboard (WIMT) |
 | `WIMT_DEBUG_USAGE` | off | Set `1` to log normalized usage |
 
 The dashboard can also change OpenAI/Anthropic upstream URLs at runtime.

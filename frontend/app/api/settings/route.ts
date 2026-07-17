@@ -11,7 +11,7 @@ export function GET() {
 
   return Response.json({
     ...settings,
-    // Optional public CLI entry (e.g. Headroom on :8787). UI uses this for
+    // Optional public CLI entry (normally WIMT on :4393). UI uses this for
     // proxy URL copy/export; falls back to the page origin when unset.
     proxyPublicBaseUrl: proxyPublicBaseUrl || null,
   });

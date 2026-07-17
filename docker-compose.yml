@@ -9,7 +9,7 @@ services:
       - "127.0.0.1:${WIMT_PORT:-4393}:4393"
     environment:
       WIMT_DB_PATH: /app/data/wimt.sqlite
-      PROXY_PUBLIC_BASE_URL: ${PROXY_PUBLIC_BASE_URL:-http://127.0.0.1:8787}
+      PROXY_PUBLIC_BASE_URL: ${PROXY_PUBLIC_BASE_URL:-http://127.0.0.1:4393}
       OPENAI_UPSTREAM_BASE_URL: ${OPENAI_UPSTREAM_BASE_URL:-https://api.openai.com}
       ANTHROPIC_UPSTREAM_BASE_URL: ${ANTHROPIC_UPSTREAM_BASE_URL:-https://api.anthropic.com}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-auto}

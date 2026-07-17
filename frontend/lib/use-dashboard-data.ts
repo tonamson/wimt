@@ -36,7 +36,7 @@ export function useDashboardData() {
   const [chartRows, setChartRows] = useState<UsagePoint[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [cursorStack, setCursorStack] = useState<number[]>([]);
-  const [proxyBaseUrl, setProxyBaseUrl] = useState("http://127.0.0.1:8787");
+  const [proxyBaseUrl, setProxyBaseUrl] = useState("http://127.0.0.1:4393");
   const [dateSelection, setDateSelection] = useState<DateSelection>({
     from: "",
     to: "",
@@ -75,7 +75,7 @@ export function useDashboardData() {
       nextSettings.proxyPublicBaseUrl ||
         (typeof window !== "undefined"
           ? window.location.origin
-          : "http://127.0.0.1:8787"),
+          : "http://127.0.0.1:4393"),
     );
   }, []);
 

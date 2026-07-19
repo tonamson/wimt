@@ -26,7 +26,9 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:4393
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-The proxy endpoint is `/v1/*`. It forwards to the configured upstream and logs usage into SQLite.
+The public proxy endpoint is `/v1/*`. Claude's `/v1/messages` goes through
+Headroom before WIMT forwards it upstream and logs usage into SQLite. Other
+routes go directly to WIMT.
 
 ## Configure
 
@@ -63,7 +65,9 @@ The dashboard can also change OpenAI/Anthropic upstream URLs at runtime.
 
 ## Docker
 
-Ports bind to **127.0.0.1** only (not LAN). Config comes from `.env`:
+Only port `4393` binds to **127.0.0.1** (not LAN). Caddy routes Claude's
+`/v1/messages` through the internal Headroom service; WIMT and Headroom are not
+published directly. Config comes from `.env`:
 
 ```bash
 # repo root

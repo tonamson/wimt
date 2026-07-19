@@ -1,12 +1,26 @@
 # Config: copy .env.example → .env (Compose loads .env for ${VAR} substitution).
 services:
+  gateway:
+    image: caddy:2-alpine
+    container_name: wimt-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WIMT_PORT:-4393}:4393"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      wimt:
+        condition: service_started
+      headroom:
+        condition: service_started
+
   wimt:
     build:
       context: ./frontend
     container_name: wimt
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${WIMT_PORT:-4393}:4393"
+    expose:
+      - "4393"
     environment:
       WIMT_DB_PATH: /app/data/wimt.sqlite
       PROXY_PUBLIC_BASE_URL: ${PROXY_PUBLIC_BASE_URL:-http://127.0.0.1:4393}
@@ -48,8 +62,8 @@ services:
       - "http://wimt:4393"
       - --log-file
       - "/root/.headroom/requests.jsonl"
-    ports:
-      - "127.0.0.1:${HEADROOM_PORT:-8787}:8787"
+    expose:
+      - "8787"
     volumes:
       - headroom-data:/root/.headroom
     restart: unless-stopped

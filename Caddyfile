@@ -1,0 +1,21 @@
+{
+	log default {
+		format filter {
+			request>headers>X-Api-Key replace REDACTED
+		}
+	}
+}
+
+:4393 {
+	@anthropic path /v1/messages /v1/messages/*
+
+	handle @anthropic {
+		reverse_proxy headroom:8787 {
+			lb_try_duration 5s
+		}
+	}
+
+	handle {
+		reverse_proxy wimt:4393
+	}
+}

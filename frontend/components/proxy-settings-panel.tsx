@@ -72,7 +72,7 @@ export function ProxySettingsPanel({
             onCopy={() => void copyValue(openaiProxy, "openai-proxy")}
           />
           <ProxyLine
-            label="Claude / Anthropic"
+            label="Claude / Anthropic (via Headroom)"
             value={anthropicProxy}
             copied={copied === "anthropic-proxy"}
             onCopy={() => void copyValue(anthropicProxy, "anthropic-proxy")}

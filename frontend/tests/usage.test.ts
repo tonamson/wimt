@@ -101,6 +101,74 @@ test("normalizes final usage from sse", () => {
   assert.equal(result.usageMissing, false);
 });
 
+test("normalizes OpenAI Responses API non-stream usage", () => {
+  const result = normalizeUsage({
+    id: "resp_123",
+    object: "response",
+    model: "grok-4.5",
+    usage: {
+      input_tokens: 53,
+      input_tokens_details: { cached_tokens: 12 },
+      output_tokens: 271,
+      output_tokens_details: { reasoning_tokens: 256 },
+      total_tokens: 324,
+    },
+  });
+
+  assert.equal(result.schema, "openai");
+  assert.equal(result.inputTokens, 53);
+  assert.equal(result.outputTokens, 271);
+  assert.equal(result.cacheReadTokens, 12);
+  assert.equal(result.cacheWriteTokens, 0);
+  assert.equal(result.totalCacheTokens, 12);
+  assert.equal(result.totalTokens, 324);
+  assert.equal(result.usageMissing, false);
+});
+
+test("normalizes nested response.usage from Responses API stream event", () => {
+  // Grok / OpenAI Responses SSE: usage lives under response, not top-level.
+  const result = normalizeUsage({
+    type: "response.completed",
+    sequence_number: 42,
+    response: {
+      id: "de4bbeac-d726-996c-94ed-2a2165729fb9",
+      model: "grok-4.5-build",
+      object: "response",
+      usage: {
+        input_tokens: 120,
+        input_tokens_details: { cached_tokens: 40 },
+        output_tokens: 80,
+        output_tokens_details: { reasoning_tokens: 0 },
+        total_tokens: 200,
+      },
+    },
+  });
+
+  assert.equal(result.schema, "openai");
+  assert.equal(result.inputTokens, 120);
+  assert.equal(result.outputTokens, 80);
+  assert.equal(result.cacheReadTokens, 40);
+  assert.equal(result.totalTokens, 200);
+  assert.equal(result.usageMissing, false);
+});
+
+test("normalizes Responses API usage from SSE stream (Grok /v1/responses)", () => {
+  const result = normalizeUsageFromSse(
+    [
+      'event: response.created\ndata: {"type":"response.created","response":{"usage":null,"model":"grok-4.5"}}',
+      'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"hi"}',
+      'event: response.completed\ndata: {"type":"response.completed","response":{"model":"grok-4.5","usage":{"input_tokens":53,"input_tokens_details":{"cached_tokens":0},"output_tokens":271,"output_tokens_details":{"reasoning_tokens":256},"total_tokens":324}}}',
+    ].join("\n\n"),
+  );
+
+  assert.equal(result.schema, "openai");
+  assert.equal(result.inputTokens, 53);
+  assert.equal(result.outputTokens, 271);
+  assert.equal(result.cacheReadTokens, 0);
+  assert.equal(result.totalTokens, 324);
+  assert.equal(result.usageMissing, false);
+});
+
 test("incremental sse parser keeps latest usage across chunks", () => {
   const parser = createSseUsageParser();
   parser.push('event: content_block_delta\ndata: {"delta":{"text":"hi"}}\n\n');

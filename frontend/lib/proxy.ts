@@ -322,7 +322,10 @@ function stripResponseHeaders(headers: Headers) {
   const nextHeaders = new Headers();
 
   headers.forEach((value, key) => {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+    if (
+      !HOP_BY_HOP_HEADERS.has(key.toLowerCase()) &&
+      key.toLowerCase() !== "content-encoding"
+    ) {
       nextHeaders.set(key, value);
     }
   });

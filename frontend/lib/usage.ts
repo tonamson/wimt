@@ -50,6 +50,39 @@ export function normalizeUsage(responseJson: unknown): NormalizedUsage {
     };
   }
 
+  // OpenAI Responses API (and xAI Grok /v1/responses): input_tokens/output_tokens
+  // plus total_tokens and/or input_tokens_details — not Anthropic cache field names.
+  if (
+    (isNumber(usage.input_tokens) || isNumber(usage.output_tokens)) &&
+    isOpenAiResponsesUsage(usage)
+  ) {
+    const inputDetails = isRecord(usage.input_tokens_details)
+      ? usage.input_tokens_details
+      : {};
+    const inputTokens = numberOrZero(usage.input_tokens);
+    const outputTokens = numberOrZero(usage.output_tokens);
+    const cacheReadTokens = numberOrZero(inputDetails.cached_tokens);
+    const cacheWriteTokens = numberOrZero(
+      inputDetails.cache_write_tokens ?? inputDetails.cache_creation_tokens,
+    );
+    // Responses API total_tokens is input+output (cached is a subset of input).
+    const totalTokens = isNumber(usage.total_tokens)
+      ? usage.total_tokens
+      : inputTokens + outputTokens;
+
+    return {
+      schema: "openai",
+      inputTokens,
+      outputTokens,
+      cacheWriteTokens,
+      cacheReadTokens,
+      totalCacheTokens: cacheWriteTokens + cacheReadTokens,
+      totalTokens,
+      rawUsage: usage,
+      usageMissing: false,
+    };
+  }
+
   if (isNumber(usage.input_tokens) || isNumber(usage.output_tokens)) {
     const inputTokens = numberOrZero(usage.input_tokens);
     const outputTokens = numberOrZero(usage.output_tokens);
@@ -133,12 +166,47 @@ export function createSseUsageParser() {
   };
 }
 
+/**
+ * Locate a usage object from:
+ * - top-level `usage` (chat completions, Anthropic messages, non-stream Responses)
+ * - nested `response.usage` (OpenAI/xAI Responses API SSE: response.completed, etc.)
+ */
 function getUsage(value: unknown): JsonRecord | null {
-  if (!isRecord(value) || !isRecord(value.usage)) {
+  if (!isRecord(value)) {
     return null;
   }
 
-  return value.usage;
+  if (isRecord(value.usage)) {
+    return value.usage;
+  }
+
+  // Responses API stream events: { type: "response.completed", response: { usage } }
+  if (isRecord(value.response) && isRecord(value.response.usage)) {
+    return value.response.usage;
+  }
+
+  return null;
+}
+
+/** True when usage matches OpenAI Responses API shape (used by Grok /v1/responses). */
+function isOpenAiResponsesUsage(usage: JsonRecord): boolean {
+  if (isNumber(usage.total_tokens)) {
+    return true;
+  }
+
+  if (isRecord(usage.input_tokens_details) || isRecord(usage.output_tokens_details)) {
+    return true;
+  }
+
+  // Anthropic-only cache fields → not Responses API.
+  if (
+    isNumber(usage.cache_creation_input_tokens) ||
+    isNumber(usage.cache_read_input_tokens)
+  ) {
+    return false;
+  }
+
+  return false;
 }
 
 function emptyUsage(usageMissing: boolean, rawUsage: unknown): NormalizedUsage {

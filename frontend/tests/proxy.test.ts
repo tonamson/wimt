@@ -78,6 +78,48 @@ test("pickProvider respects path, headers, and manual default", () => {
   );
 });
 
+test("drops stale content encoding from decoded upstream responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDbPath = process.env.WIMT_DB_PATH;
+  const dir = mkdtempSync(path.join(tmpdir(), "wimt-proxy-encoding-"));
+  process.env.WIMT_DB_PATH = path.join(dir, "test.sqlite");
+  delete (globalThis as { __wimtStore?: unknown }).__wimtStore;
+
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ usage: { input_tokens: 1, output_tokens: 1 } }), {
+      headers: {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+      },
+    });
+
+  try {
+    const response = await proxyAiRequest(
+      new Request("http://wimt.test/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "claude-test" }),
+      }),
+      ["messages"],
+    );
+
+    assert.equal(response.headers.get("content-encoding"), null);
+    assert.deepEqual(await response.json(), {
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    getStore().close();
+    delete (globalThis as { __wimtStore?: unknown }).__wimtStore;
+    if (originalDbPath === undefined) {
+      delete process.env.WIMT_DB_PATH;
+    } else {
+      process.env.WIMT_DB_PATH = originalDbPath;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("proxy stores WIMT measurement session and CLI session separately", async () => {
   const originalFetch = globalThis.fetch;
   const originalDbPath = process.env.WIMT_DB_PATH;
@@ -254,6 +296,75 @@ test("parses stream usage incrementally without requiring full buffer first", as
     assert.equal(row.outputTokens, 3);
     assert.equal(row.cacheReadTokens, 1);
     assert.equal(row.totalTokens, 16);
+  } finally {
+    globalThis.fetch = originalFetch;
+    getStore().close();
+    delete (globalThis as { __wimtStore?: unknown }).__wimtStore;
+    if (originalDbPath === undefined) {
+      delete process.env.WIMT_DB_PATH;
+    } else {
+      process.env.WIMT_DB_PATH = originalDbPath;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("parses Grok / OpenAI Responses API stream usage from nested response.usage", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDbPath = process.env.WIMT_DB_PATH;
+  const dir = mkdtempSync(path.join(tmpdir(), "wimt-proxy-responses-"));
+  process.env.WIMT_DB_PATH = path.join(dir, "test.sqlite");
+  delete (globalThis as { __wimtStore?: unknown }).__wimtStore;
+
+  const sse = [
+    'event: response.created\ndata: {"type":"response.created","response":{"usage":null,"model":"grok-4.5"}}\n\n',
+    'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+    'event: response.completed\ndata: {"type":"response.completed","response":{"model":"grok-4.5","usage":{"input_tokens":53,"input_tokens_details":{"cached_tokens":10},"output_tokens":20,"total_tokens":73}}}\n\n',
+  ].join("");
+
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(sse));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      },
+    );
+
+  try {
+    const response = await proxyAiRequest(
+      new Request("http://wimt.test/v1/responses", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "text/event-stream",
+        },
+        body: JSON.stringify({ model: "grok-4.5", stream: true }),
+      }),
+      ["responses"],
+    );
+
+    assert.equal(response.status, 200);
+    await response.text();
+
+    let row = getStore().listRequests(1)[0];
+    for (let attempt = 0; attempt < 20 && row.usageMissing === 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      row = getStore().listRequests(1)[0];
+    }
+
+    assert.equal(row.usageMissing, 0);
+    assert.equal(row.providerSchema, "openai");
+    assert.equal(row.inputTokens, 53);
+    assert.equal(row.outputTokens, 20);
+    assert.equal(row.cacheReadTokens, 10);
+    assert.equal(row.totalTokens, 73);
   } finally {
     globalThis.fetch = originalFetch;
     getStore().close();
